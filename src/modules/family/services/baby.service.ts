@@ -385,7 +385,20 @@ export class BabyService {
   }
 
   private async toBirthdayResponse(birthday: BabyBirthdayEntity): Promise<BabyBirthdayResponseDto> {
-    const media = [...(birthday.media ?? [])].sort((left, right) => left.sort - right.sort);
+    const media = [...(birthday.media ?? [])].sort((left, right) => {
+      const sortDiff = (left.sort ?? 0) - (right.sort ?? 0);
+      if (sortDiff !== 0) {
+        return sortDiff;
+      }
+
+      const createdAtDiff =
+        (left.createdAt?.getTime?.() ?? 0) - (right.createdAt?.getTime?.() ?? 0);
+      if (createdAtDiff !== 0) {
+        return createdAtDiff;
+      }
+
+      return left.id - right.id;
+    });
     const contributions = [...(birthday.contributions ?? [])].sort(
       (left, right) => (left.createdAt?.getTime?.() ?? 0) - (right.createdAt?.getTime?.() ?? 0),
     );

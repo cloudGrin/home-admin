@@ -129,6 +129,50 @@ describe('BabyService', () => {
     );
   });
 
+  it('keeps birthday media ordering stable when multiple contributions reuse the same sort values', async () => {
+    profileRepository.findOne.mockResolvedValue(
+      Object.assign(new BabyProfileEntity(), {
+        id: 1,
+        nickname: '小葡萄',
+        birthDate: '2026-02-01',
+      }),
+    );
+    growthRepository.find.mockResolvedValue([]);
+    birthdayRepository.find.mockResolvedValue([
+      Object.assign(new BabyBirthdayEntity(), {
+        id: 21,
+        year: 2027,
+        title: '一周岁生日',
+        media: [
+          Object.assign(new BabyBirthdayMediaEntity(), {
+            id: 32,
+            fileId: 42,
+            sort: 1,
+            createdAt: new Date('2027-02-01T10:03:00.000Z'),
+          }),
+          Object.assign(new BabyBirthdayMediaEntity(), {
+            id: 31,
+            fileId: 41,
+            sort: 0,
+            createdAt: new Date('2027-02-01T10:02:00.000Z'),
+          }),
+          Object.assign(new BabyBirthdayMediaEntity(), {
+            id: 30,
+            fileId: 40,
+            sort: 0,
+            createdAt: new Date('2027-02-01T10:01:00.000Z'),
+          }),
+        ],
+        contributions: [],
+      }),
+    ]);
+
+    const overview = await service.findOverview();
+
+    expect(overview.birthdays[0].media.map((item) => item.id)).toEqual([30, 31, 32]);
+    expect(overview.birthdays[0].coverUrl).toBe('/private/files/40');
+  });
+
   it('rejects duplicate birthday years when backend creates annual albums', async () => {
     birthdayRepository.findOne.mockResolvedValue(
       Object.assign(new BabyBirthdayEntity(), { id: 21, year: 2027 }),
