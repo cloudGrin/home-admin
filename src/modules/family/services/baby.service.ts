@@ -29,8 +29,10 @@ import {
   BabyGrowthRecordEntity,
   BabyProfileEntity,
 } from '../entities';
+import { FAMILY_PRIVATE_MEDIA_CACHE_MAX_AGE_SECONDS } from '../family-media-cache.constants';
 
 const BABY_BIRTHDAY_FILE_MODULE = 'baby-birthday';
+const BABY_AVATAR_FILE_MODULE = 'baby-avatar';
 const BABY_BIRTHDAY_ALLOWED_IMAGE_TYPES = [
   '.jpg',
   '.jpeg',
@@ -204,6 +206,26 @@ export class BabyService {
     await this.birthdayRepository.softDelete(id);
   }
 
+  async uploadAvatarImage(file: Express.Multer.File, user: AuthenticatedUser): Promise<FileEntity> {
+    if (!file) {
+      throw BusinessException.validationFailed('请选择要上传的宝宝头像');
+    }
+    this.ensureImageMetadata(file.originalname, file.mimetype || 'application/octet-stream');
+
+    return this.fileService.upload(
+      file,
+      {
+        module: BABY_AVATAR_FILE_MODULE,
+        tags: 'baby,avatar',
+        isPublic: false,
+        storage: FileStorageType.LOCAL,
+        maxSize: DEFAULT_FAMILY_MEDIA_MAX_SIZE,
+        allowedTypes: BABY_BIRTHDAY_ALLOWED_IMAGE_TYPES,
+      },
+      user.id,
+    );
+  }
+
   async uploadBirthdayImage(
     birthdayId: number,
     file: Express.Multer.File,
@@ -354,6 +376,7 @@ export class BabyService {
       ? (
           await this.fileService.createTrustedAccessLink(profile.avatarFileId, {
             disposition: 'inline',
+            cacheMaxAgeSeconds: FAMILY_PRIVATE_MEDIA_CACHE_MAX_AGE_SECONDS,
           })
         ).url
       : null;
@@ -409,6 +432,7 @@ export class BabyService {
             await this.fileService.createTrustedAccessLink(birthday.coverFileId, {
               disposition: 'inline',
               process: BABY_IMAGE_WEBP_PROCESS,
+              cacheMaxAgeSeconds: FAMILY_PRIVATE_MEDIA_CACHE_MAX_AGE_SECONDS,
             })
           ).url
         : (mediaResponses[0]?.displayUrl ?? null);
@@ -454,6 +478,7 @@ export class BabyService {
     const link = await this.fileService.createTrustedAccessLink(media.fileId, {
       disposition: 'inline',
       process: BABY_IMAGE_WEBP_PROCESS,
+      cacheMaxAgeSeconds: FAMILY_PRIVATE_MEDIA_CACHE_MAX_AGE_SECONDS,
     });
 
     return {

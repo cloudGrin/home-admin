@@ -173,6 +173,51 @@ describe('BabyService', () => {
     expect(overview.birthdays[0].coverUrl).toBe('/private/files/40');
   });
 
+  it('uses private cache links for baby avatar, birthday cover and birthday media', async () => {
+    profileRepository.findOne.mockResolvedValue(
+      Object.assign(new BabyProfileEntity(), {
+        id: 1,
+        nickname: '小葡萄',
+        birthDate: '2026-02-01',
+        avatarFileId: 10,
+      }),
+    );
+    growthRepository.find.mockResolvedValue([]);
+    birthdayRepository.find.mockResolvedValue([
+      Object.assign(new BabyBirthdayEntity(), {
+        id: 21,
+        year: 2027,
+        title: '一周岁生日',
+        coverFileId: 20,
+        media: [Object.assign(new BabyBirthdayMediaEntity(), { id: 31, fileId: 41, sort: 0 })],
+        contributions: [],
+      }),
+    ]);
+
+    await service.findOverview();
+
+    expect(fileService.createTrustedAccessLink).toHaveBeenCalledWith(
+      10,
+      expect.objectContaining({ disposition: 'inline', cacheMaxAgeSeconds: 30 * 24 * 60 * 60 }),
+    );
+    expect(fileService.createTrustedAccessLink).toHaveBeenCalledWith(
+      20,
+      expect.objectContaining({
+        disposition: 'inline',
+        process: 'image/format,webp/quality,Q_100',
+        cacheMaxAgeSeconds: 30 * 24 * 60 * 60,
+      }),
+    );
+    expect(fileService.createTrustedAccessLink).toHaveBeenCalledWith(
+      41,
+      expect.objectContaining({
+        disposition: 'inline',
+        process: 'image/format,webp/quality,Q_100',
+        cacheMaxAgeSeconds: 30 * 24 * 60 * 60,
+      }),
+    );
+  });
+
   it('rejects duplicate birthday years when backend creates annual albums', async () => {
     birthdayRepository.findOne.mockResolvedValue(
       Object.assign(new BabyBirthdayEntity(), { id: 21, year: 2027 }),
@@ -214,6 +259,41 @@ describe('BabyService', () => {
         sort: 0,
       }),
     ]);
+  });
+
+  it('uploads baby avatar images through the baby profile permission path', async () => {
+    const avatarFile = {
+      originalname: 'avatar.jpg',
+      mimetype: 'image/jpeg',
+      size: 1024,
+      buffer: Buffer.from('avatar'),
+    } as Express.Multer.File;
+    fileService.upload.mockResolvedValue(
+      Object.assign(new FileEntity(), {
+        id: 88,
+        module: 'baby-avatar',
+        mimeType: 'image/jpeg',
+      }),
+    );
+
+    await service.uploadAvatarImage(avatarFile, {
+      id: 1,
+      username: 'admin',
+      email: 'admin@example.com',
+      roles: [],
+      sessionId: 's1',
+    });
+
+    expect(fileService.upload).toHaveBeenCalledWith(
+      avatarFile,
+      expect.objectContaining({
+        module: 'baby-avatar',
+        tags: 'baby,avatar',
+        isPublic: false,
+        storage: FileStorageType.LOCAL,
+      }),
+      1,
+    );
   });
 
   it('allows users to delete only their own birthday contributions', async () => {

@@ -47,6 +47,7 @@ import {
   FamilyPostLikeEntity,
   FamilyPostMediaEntity,
 } from '../entities';
+import { FAMILY_PRIVATE_MEDIA_CACHE_MAX_AGE_SECONDS } from '../family-media-cache.constants';
 import { FamilyEventService } from './family-event.service';
 
 const FAMILY_IMAGE_WEBP_PROCESS = 'image/format,webp/quality,Q_100';
@@ -384,6 +385,7 @@ export class FamilyService {
         const file = item.file;
         const link = await this.fileService.createTrustedAccessLink(item.fileId, {
           disposition: 'inline',
+          cacheMaxAgeSeconds: FAMILY_PRIVATE_MEDIA_CACHE_MAX_AGE_SECONDS,
           ...(item.mediaType === FamilyMediaType.IMAGE
             ? {
                 process: FAMILY_IMAGE_WEBP_PROCESS,

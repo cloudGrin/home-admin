@@ -136,6 +136,7 @@ export class OssStorageStrategy implements FileStorageStrategy {
     response?: {
       contentDisposition?: string;
       process?: string;
+      cacheControl?: string;
     },
   ): string {
     const client = this.ensureClient();
@@ -148,6 +149,7 @@ export class OssStorageStrategy implements FileStorageStrategy {
             ...(response.contentDisposition
               ? { 'content-disposition': response.contentDisposition }
               : {}),
+            ...(response.cacheControl ? { 'cache-control': response.cacheControl } : {}),
           }
         : undefined,
     });

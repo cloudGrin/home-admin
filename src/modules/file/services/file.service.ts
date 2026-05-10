@@ -65,11 +65,17 @@ interface FileAccessTokenPayload extends BaseTokenPayload {
   fileId: number;
   disposition: FileAccessDisposition;
   process?: string;
+  cacheMaxAgeSeconds?: number;
 }
 
 interface FileValidationOptions {
   maxSize?: number;
   allowedTypes?: string[];
+}
+
+interface TrustedAccessLinkOptions {
+  process?: string;
+  cacheMaxAgeSeconds?: number;
 }
 
 const FILE_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'originalName', 'filename', 'size']);
@@ -473,19 +479,24 @@ export class FileService {
 
   async createTrustedAccessLink(
     id: number,
-    dto: CreateFileAccessLinkDto & { process?: string },
+    dto: CreateFileAccessLinkDto & TrustedAccessLinkOptions,
   ): Promise<{
     url: string;
     token: string;
     expiresAt: string;
+    cacheMaxAgeSeconds?: number;
   }> {
-    const expiresAt = this.getExpiresAt(this.privateLinkTtlSeconds);
+    const cacheMaxAgeSeconds = this.normalizeCacheMaxAgeSeconds(dto.cacheMaxAgeSeconds);
+    const expiresAt = cacheMaxAgeSeconds
+      ? this.getStableWindowExpiresAt(cacheMaxAgeSeconds)
+      : this.getExpiresAt(this.privateLinkTtlSeconds);
     const disposition = dto.disposition ?? 'attachment';
     const tokenPayload: FileAccessTokenPayload = {
       type: 'file-access',
       fileId: id,
       disposition,
       process: dto.process,
+      cacheMaxAgeSeconds,
       exp: expiresAt.unix,
     };
     const token = this.signToken(tokenPayload);
@@ -494,6 +505,7 @@ export class FileService {
       url: this.buildAccessUrl(id, token),
       token,
       expiresAt: expiresAt.iso,
+      cacheMaxAgeSeconds,
     };
   }
 
@@ -505,6 +517,7 @@ export class FileService {
     disposition: FileAccessDisposition;
     stream?: NodeJS.ReadableStream;
     redirectUrl?: string;
+    cacheMaxAgeSeconds?: number;
   }> {
     const payload = this.verifyToken<FileAccessTokenPayload>(token, '访问链接无效或已过期');
     if (payload.type !== 'file-access' || payload.fileId !== id) {
@@ -512,15 +525,23 @@ export class FileService {
     }
 
     const file = await this.findById(id);
+    const cacheMaxAgeSeconds = this.getAccessCacheMaxAgeSeconds(payload);
     if (file.storage === FileStorageType.OSS) {
       const oss = this.storageFactory.getOssStrategy();
+      const cacheControl = this.buildPrivateCacheControl(cacheMaxAgeSeconds);
       return {
         file,
         disposition: payload.disposition,
-        redirectUrl: oss.createSignedDownloadUrl(file.path, this.signedOssDownloadTtlSeconds, {
-          contentDisposition: this.buildContentDisposition(file, payload.disposition),
-          process: payload.process,
-        }),
+        redirectUrl: oss.createSignedDownloadUrl(
+          file.path,
+          cacheMaxAgeSeconds ?? this.signedOssDownloadTtlSeconds,
+          {
+            contentDisposition: this.buildContentDisposition(file, payload.disposition),
+            process: payload.process,
+            cacheControl,
+          },
+        ),
+        cacheMaxAgeSeconds,
       };
     }
 
@@ -529,6 +550,7 @@ export class FileService {
       file,
       disposition: payload.disposition,
       stream: await storage.getStream(file.path),
+      cacheMaxAgeSeconds,
     };
   }
 
@@ -722,6 +744,41 @@ export class FileService {
       unix,
       iso: new Date(unix * 1000).toISOString(),
     };
+  }
+
+  private getStableWindowExpiresAt(windowSeconds: number): { unix: number; iso: string } {
+    const now = Math.floor(Date.now() / 1000);
+    const unix = (Math.floor(now / windowSeconds) + 1) * windowSeconds;
+    return {
+      unix,
+      iso: new Date(unix * 1000).toISOString(),
+    };
+  }
+
+  private normalizeCacheMaxAgeSeconds(value?: number): number | undefined {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      return undefined;
+    }
+    const seconds = Math.floor(value);
+    return seconds > 0 ? seconds : undefined;
+  }
+
+  private getAccessCacheMaxAgeSeconds(payload: FileAccessTokenPayload): number | undefined {
+    const cacheMaxAgeSeconds = this.normalizeCacheMaxAgeSeconds(payload.cacheMaxAgeSeconds);
+    if (!cacheMaxAgeSeconds) {
+      return undefined;
+    }
+
+    const remainingSeconds = payload.exp - Math.floor(Date.now() / 1000);
+    if (remainingSeconds <= 0) {
+      return undefined;
+    }
+
+    return Math.min(cacheMaxAgeSeconds, remainingSeconds);
+  }
+
+  private buildPrivateCacheControl(maxAgeSeconds?: number): string | undefined {
+    return maxAgeSeconds ? `private, max-age=${maxAgeSeconds}` : undefined;
   }
 
   private signToken(payload: BaseTokenPayload): string {

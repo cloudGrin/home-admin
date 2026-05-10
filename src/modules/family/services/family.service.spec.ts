@@ -360,12 +360,13 @@ describe('FamilyService', () => {
       expect.objectContaining({
         disposition: 'inline',
         process: 'image/format,webp/quality,Q_100',
+        cacheMaxAgeSeconds: 30 * 24 * 60 * 60,
       }),
     );
     expect(fileService.createTrustedAccessLink).toHaveBeenNthCalledWith(
       2,
       8,
-      expect.objectContaining({ disposition: 'inline' }),
+      expect.objectContaining({ disposition: 'inline', cacheMaxAgeSeconds: 30 * 24 * 60 * 60 }),
     );
     expect(result).toEqual([
       expect.objectContaining({ fileId: 7, mediaType: 'image', displayUrl: expect.any(String) }),

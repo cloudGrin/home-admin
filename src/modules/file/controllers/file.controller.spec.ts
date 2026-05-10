@@ -8,6 +8,7 @@ describe('FileController', () => {
   const createController = () => {
     const fileService = {
       upload: jest.fn().mockResolvedValue({ id: 1 }),
+      resolveAccessLink: jest.fn(),
     };
 
     return {
@@ -29,6 +30,11 @@ describe('FileController', () => {
       path: '',
       stream: undefined as any,
     }) as Express.Multer.File;
+
+  const createResponse = () => ({
+    setHeader: jest.fn(),
+    redirect: jest.fn(),
+  });
 
   it('uses UploadFileDto for upload body validation', () => {
     const paramTypes = Reflect.getMetadata('design:paramtypes', FileController.prototype, 'upload');
@@ -95,5 +101,44 @@ describe('FileController', () => {
     );
 
     expect(accessByLinkSource).not.toContain('@Res({ passthrough: true })');
+  });
+
+  it('sets private cache headers for cached local access links', async () => {
+    const { controller, fileService } = createController();
+    const stream = { pipe: jest.fn() };
+    const res = createResponse();
+    fileService.resolveAccessLink.mockResolvedValue({
+      file: {
+        originalName: 'family.jpg',
+        mimeType: 'image/jpeg',
+      },
+      disposition: 'inline',
+      stream,
+      cacheMaxAgeSeconds: 120,
+    });
+
+    await controller.accessByLink(5, 'token', res as any);
+
+    expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'private, max-age=120');
+    expect(stream.pipe).toHaveBeenCalledWith(res);
+  });
+
+  it('sets private cache headers before redirecting cached OSS access links', async () => {
+    const { controller, fileService } = createController();
+    const res = createResponse();
+    fileService.resolveAccessLink.mockResolvedValue({
+      file: {
+        originalName: 'family.jpg',
+        mimeType: 'image/jpeg',
+      },
+      disposition: 'inline',
+      redirectUrl: 'https://oss.example.com/family.jpg',
+      cacheMaxAgeSeconds: 120,
+    });
+
+    await controller.accessByLink(5, 'token', res as any);
+
+    expect(res.setHeader).toHaveBeenCalledWith('Cache-Control', 'private, max-age=120');
+    expect(res.redirect).toHaveBeenCalledWith(302, 'https://oss.example.com/family.jpg');
   });
 });

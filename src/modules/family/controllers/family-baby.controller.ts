@@ -47,6 +47,31 @@ export class FamilyBabyController {
     return this.babyService.saveProfile(dto);
   }
 
+  @Post('avatar/upload')
+  @RequirePermissions('baby:update')
+  @UseInterceptors(FileInterceptor('file'))
+  @ApiOperation({ summary: '上传宝宝头像' })
+  @ApiConsumes('multipart/form-data')
+  @ApiBody({
+    schema: {
+      type: 'object',
+      required: ['file'],
+      properties: {
+        file: {
+          type: 'string',
+          format: 'binary',
+          description: '宝宝头像图片文件',
+        },
+      },
+    },
+  })
+  async uploadAvatarImage(
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.babyService.uploadAvatarImage(file, user);
+  }
+
   @Post('growth-records')
   @RequirePermissions('baby:update')
   @ApiOperation({ summary: '新增宝宝成长记录' })

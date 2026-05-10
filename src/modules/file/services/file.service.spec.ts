@@ -101,6 +101,7 @@ describe('FileService', () => {
 
   afterEach(() => {
     jest.clearAllMocks();
+    jest.useRealTimers();
   });
 
   it('应该正确初始化服务', () => {
@@ -629,6 +630,82 @@ describe('FileService', () => {
           process: 'image/format,webp/quality,Q_100',
         }),
       );
+    });
+
+    it('keeps trusted access links stable inside a private cache window', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-05-10T00:00:00.000Z'));
+
+      const first = await service.createTrustedAccessLink(5, {
+        disposition: 'inline',
+        process: 'image/format,webp/quality,Q_100',
+        cacheMaxAgeSeconds: 30 * 24 * 60 * 60,
+      });
+
+      jest.setSystemTime(new Date('2026-05-15T00:00:00.000Z'));
+
+      const second = await service.createTrustedAccessLink(5, {
+        disposition: 'inline',
+        process: 'image/format,webp/quality,Q_100',
+        cacheMaxAgeSeconds: 30 * 24 * 60 * 60,
+      });
+
+      expect(second.url).toBe(first.url);
+      expect(second.expiresAt).toBe(first.expiresAt);
+      expect(first.cacheMaxAgeSeconds).toBe(30 * 24 * 60 * 60);
+    });
+
+    it('exposes remaining private cache max-age when resolving cached trusted links', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-05-10T00:00:00.000Z'));
+      repository.findOne.mockResolvedValue({
+        id: 5,
+        originalName: 'family.jpg',
+        path: 'family-circle/2026/05/04/family.jpg',
+        mimeType: 'image/jpeg',
+        storage: FileStorageType.LOCAL,
+        isPublic: false,
+        uploaderId: 1,
+      } as FileEntity);
+      const link = await service.createTrustedAccessLink(5, {
+        disposition: 'inline',
+        cacheMaxAgeSeconds: 30 * 24 * 60 * 60,
+      });
+
+      jest.setSystemTime(new Date('2026-05-10T00:00:10.000Z'));
+
+      const result = await service.resolveAccessLink(5, link.token);
+
+      expect(result.cacheMaxAgeSeconds).toBeGreaterThan(0);
+      expect(result.cacheMaxAgeSeconds).toBeLessThanOrEqual(30 * 24 * 60 * 60);
+    });
+
+    it('matches OSS signed download TTL to cached trusted link lifetime', async () => {
+      jest.useFakeTimers().setSystemTime(new Date('2026-05-10T00:00:00.000Z'));
+      repository.findOne.mockResolvedValue({
+        id: 5,
+        originalName: 'family.jpg',
+        path: 'family-circle/2026/05/04/family.jpg',
+        mimeType: 'image/jpeg',
+        storage: FileStorageType.OSS,
+        isPublic: false,
+        uploaderId: 1,
+      } as FileEntity);
+      const link = await service.createTrustedAccessLink(5, {
+        disposition: 'inline',
+        cacheMaxAgeSeconds: 30 * 24 * 60 * 60,
+      });
+
+      await service.resolveAccessLink(5, link.token);
+
+      expect(storageFactory.getOssStrategy().createSignedDownloadUrl).toHaveBeenCalledWith(
+        'family-circle/2026/05/04/family.jpg',
+        expect.any(Number),
+        expect.objectContaining({
+          cacheControl: expect.stringMatching(/^private, max-age=\d+$/),
+        }),
+      );
+      expect(
+        storageFactory.getOssStrategy().createSignedDownloadUrl.mock.calls.at(-1)?.[1],
+      ).toBeGreaterThan(300);
     });
   });
 

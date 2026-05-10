@@ -75,6 +75,7 @@ describe('OssStorageStrategy', () => {
     const result = strategy.createSignedDownloadUrl('family/test.jpg', 900, {
       contentDisposition: 'inline; filename="test.jpg"',
       process: 'image/format,webp/quality,Q_100',
+      cacheControl: 'private, max-age=120',
     });
 
     expect(result).toBe('https://oss.example.com/download-signature');
@@ -83,6 +84,7 @@ describe('OssStorageStrategy', () => {
       expires: 900,
       process: 'image/format,webp/quality,Q_100',
       response: {
+        'cache-control': 'private, max-age=120',
         'content-disposition': 'inline; filename="test.jpg"',
       },
     });

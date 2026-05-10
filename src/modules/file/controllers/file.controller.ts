@@ -53,6 +53,14 @@ function normalizeMulterOriginalName(originalName: string): string {
   return decoded;
 }
 
+function setPrivateCacheHeader(res: Response, maxAgeSeconds?: number): void {
+  if (!maxAgeSeconds || maxAgeSeconds <= 0) {
+    return;
+  }
+
+  res.setHeader('Cache-Control', `private, max-age=${Math.floor(maxAgeSeconds)}`);
+}
+
 @ApiTags('文件管理')
 @ApiBearerAuth()
 @Controller('files')
@@ -235,6 +243,7 @@ export class FileController {
     }
 
     const result = await this.fileService.resolveAccessLink(id, token);
+    setPrivateCacheHeader(res, result.cacheMaxAgeSeconds);
     if (result.redirectUrl) {
       res.redirect(302, result.redirectUrl);
       return;
