@@ -1,4 +1,15 @@
-import { Body, Controller, Delete, Get, Param, ParseIntPipe, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseIntPipe,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AllowAuthenticated } from '~/core/decorators';
 import { CurrentUser } from '~/modules/auth/decorators/current-user.decorator';
@@ -31,6 +42,13 @@ export class FamilyPostController {
     return this.familyService.createPost(dto, user);
   }
 
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: '删除家庭圈动态' })
+  async deletePost(@Param('id', ParseIntPipe) id: number, @CurrentUser() user: AuthenticatedUser) {
+    await this.familyService.deletePost(id, user);
+  }
+
   @Post(':id/comments')
   @ApiOperation({ summary: '评论家庭圈动态' })
   async createComment(
@@ -39,6 +57,17 @@ export class FamilyPostController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.familyService.createComment(id, dto, user);
+  }
+
+  @Delete(':postId/comments/:commentId')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: '删除家庭圈评论或回复' })
+  async deleteComment(
+    @Param('postId', ParseIntPipe) postId: number,
+    @Param('commentId', ParseIntPipe) commentId: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.familyService.deleteComment(postId, commentId, user);
   }
 
   @Post(':id/like')

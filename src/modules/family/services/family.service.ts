@@ -52,6 +52,7 @@ import { FAMILY_PRIVATE_MEDIA_CACHE_MAX_AGE_SECONDS } from '../family-media-cach
 import { FamilyEventService } from './family-event.service';
 
 const FAMILY_IMAGE_WEBP_PROCESS = 'image/format,webp/quality,Q_100';
+const FAMILY_VIDEO_POSTER_PROCESS = 'video/snapshot,t_1000,f_jpg,w_720,m_fast';
 const FAMILY_MEDIA_ALLOWED_TYPES = [
   '.jpg',
   '.jpeg',
@@ -275,6 +276,50 @@ export class FamilyService {
     this.eventService.emitPostLikeChanged({ postId, userId: user.id, liked: false });
   }
 
+  async deletePost(postId: number, user: AuthenticatedUser): Promise<void> {
+    const post = await this.ensurePostExists(postId);
+    this.ensureCanDeleteFamilyContent(post.authorId, user, '只能删除自己发布的家庭动态');
+
+    const result = await this.postRepository.softDelete(postId);
+    if (!result.affected) {
+      throw BusinessException.notFound('Family post', postId);
+    }
+
+    this.eventService.emitPostDeleted({ postId, authorId: post.authorId });
+    this.logger.log(`Deleted family post ${postId} by user ${user.id}`);
+  }
+
+  async deleteComment(
+    postId: number,
+    commentId: number,
+    user: AuthenticatedUser,
+  ): Promise<void> {
+    const comment = await this.postCommentRepository.findOne({
+      where: { id: commentId, postId },
+      relations: ['post'],
+    });
+    if (!comment) {
+      throw BusinessException.notFound('Family post comment', commentId);
+    }
+
+    const canDelete =
+      this.isSuperAdmin(user) || comment.authorId === user.id || comment.post?.authorId === user.id;
+    if (!canDelete) {
+      throw BusinessException.forbidden('只能删除自己的评论或自己动态下的评论');
+    }
+
+    const result = await this.postCommentRepository.softDelete(commentId);
+    if (!result.affected) {
+      throw BusinessException.notFound('Family post comment', commentId);
+    }
+
+    this.eventService.emitPostCommentDeleted({
+      postId,
+      commentId,
+      authorId: comment.authorId,
+    });
+  }
+
   async createChatMessage(
     dto: CreateFamilyChatMessageDto,
     user: AuthenticatedUser,
@@ -332,6 +377,25 @@ export class FamilyService {
     const responseItems = await Promise.all(sorted.map((item) => this.toChatMessageResponse(item)));
 
     return this.paginate(responseItems, totalItems, page, limit);
+  }
+
+  async deleteChatMessage(messageId: number, user: AuthenticatedUser): Promise<void> {
+    const message = await this.chatMessageRepository.findOne({ where: { id: messageId } });
+    if (!message) {
+      throw BusinessException.notFound('Family chat message', messageId);
+    }
+
+    this.ensureCanDeleteFamilyContent(message.senderId, user, '只能删除自己发送的群聊消息');
+
+    const result = await this.chatMessageRepository.softDelete(messageId);
+    if (!result.affected) {
+      throw BusinessException.notFound('Family chat message', messageId);
+    }
+
+    this.eventService.emitChatMessageDeleted({
+      messageId,
+      senderId: message.senderId,
+    });
   }
 
   async createMediaDirectUpload(dto: CreateFamilyMediaDirectUploadDto, user: AuthenticatedUser) {
@@ -394,6 +458,14 @@ export class FamilyService {
               }
             : {}),
         });
+        const posterLink =
+          item.mediaType === FamilyMediaType.VIDEO && file?.storage === FileStorageType.OSS
+            ? await this.fileService.createTrustedAccessLink(item.fileId, {
+                disposition: 'inline',
+                cacheMaxAgeSeconds: FAMILY_PRIVATE_MEDIA_CACHE_MAX_AGE_SECONDS,
+                process: FAMILY_VIDEO_POSTER_PROCESS,
+              })
+            : null;
 
         return {
           id: item.id,
@@ -404,6 +476,7 @@ export class FamilyService {
           originalName: file?.originalName,
           size: typeof file?.size === 'number' ? file.size : Number(file?.size ?? 0),
           displayUrl: link.url,
+          ...(posterLink ? { posterUrl: posterLink.url } : {}),
           expiresAt: link.expiresAt,
         };
       }),
@@ -544,6 +617,26 @@ export class FamilyService {
     }
 
     return comment;
+  }
+
+  private ensureCanDeleteFamilyContent(
+    ownerId: number,
+    user: AuthenticatedUser,
+    message: string,
+  ): void {
+    if (this.isSuperAdmin(user) || ownerId === user.id) {
+      return;
+    }
+
+    throw BusinessException.forbidden(message);
+  }
+
+  private isSuperAdmin(user: AuthenticatedUser): boolean {
+    return (
+      user.isSuperAdmin === true ||
+      user.roleCode === 'super_admin' ||
+      user.roles?.includes('super_admin')
+    );
   }
 
   private async ensureUsableMediaFiles(

@@ -68,7 +68,9 @@ describe('FamilyService', () => {
           provide: FamilyEventService,
           useValue: {
             emitPostCreated: jest.fn(),
+            emitPostDeleted: jest.fn(),
             emitPostCommentCreated: jest.fn(),
+            emitPostCommentDeleted: jest.fn(),
             emitPostLikeChanged: jest.fn(),
             emitChatMessageCreated: jest.fn(),
             emitNotificationCreated: jest.fn(),
@@ -327,7 +329,121 @@ describe('FamilyService', () => {
     );
   });
 
-  it('uses WebP display links for family images and original links for videos', async () => {
+  it('soft deletes family posts created by the current user', async () => {
+    postRepository.findOne.mockResolvedValue(
+      Object.assign(new FamilyPostEntity(), { id: 11, authorId: 1 }),
+    );
+    postRepository.softDelete.mockResolvedValue({ affected: 1 } as any);
+
+    await service.deletePost(11, {
+      id: 1,
+      username: 'dad',
+      email: 'dad@example.com',
+      roles: [],
+      sessionId: 's1',
+    });
+
+    expect(postRepository.softDelete).toHaveBeenCalledWith(11);
+    expect(eventService.emitPostDeleted).toHaveBeenCalledWith({ postId: 11, authorId: 1 });
+  });
+
+  it('rejects deleting another user family post', async () => {
+    postRepository.findOne.mockResolvedValue(
+      Object.assign(new FamilyPostEntity(), { id: 11, authorId: 2 }),
+    );
+
+    await expect(
+      service.deletePost(11, {
+        id: 1,
+        username: 'dad',
+        email: 'dad@example.com',
+        roles: [],
+        sessionId: 's1',
+      }),
+    ).rejects.toThrow(BusinessException);
+
+    expect(postRepository.softDelete).not.toHaveBeenCalled();
+    expect(eventService.emitPostDeleted).not.toHaveBeenCalled();
+  });
+
+  it('soft deletes family comments created by the current user', async () => {
+    postCommentRepository.findOne.mockResolvedValue(
+      Object.assign(new FamilyPostCommentEntity(), {
+        id: 31,
+        postId: 11,
+        authorId: 1,
+        post: Object.assign(new FamilyPostEntity(), { id: 11, authorId: 2 }),
+      }),
+    );
+    postCommentRepository.softDelete.mockResolvedValue({ affected: 1 } as any);
+
+    await service.deleteComment(11, 31, {
+      id: 1,
+      username: 'dad',
+      email: 'dad@example.com',
+      roles: [],
+      sessionId: 's1',
+    });
+
+    expect(postCommentRepository.findOne).toHaveBeenCalledWith({
+      where: { id: 31, postId: 11 },
+      relations: ['post'],
+    });
+    expect(postCommentRepository.softDelete).toHaveBeenCalledWith(31);
+    expect(eventService.emitPostCommentDeleted).toHaveBeenCalledWith({
+      postId: 11,
+      commentId: 31,
+      authorId: 1,
+    });
+  });
+
+  it('allows family post authors to delete comments under their post', async () => {
+    postCommentRepository.findOne.mockResolvedValue(
+      Object.assign(new FamilyPostCommentEntity(), {
+        id: 31,
+        postId: 11,
+        authorId: 2,
+        post: Object.assign(new FamilyPostEntity(), { id: 11, authorId: 1 }),
+      }),
+    );
+    postCommentRepository.softDelete.mockResolvedValue({ affected: 1 } as any);
+
+    await service.deleteComment(11, 31, {
+      id: 1,
+      username: 'dad',
+      email: 'dad@example.com',
+      roles: [],
+      sessionId: 's1',
+    });
+
+    expect(postCommentRepository.softDelete).toHaveBeenCalledWith(31);
+  });
+
+  it('rejects deleting another user comment on another user post', async () => {
+    postCommentRepository.findOne.mockResolvedValue(
+      Object.assign(new FamilyPostCommentEntity(), {
+        id: 31,
+        postId: 11,
+        authorId: 2,
+        post: Object.assign(new FamilyPostEntity(), { id: 11, authorId: 3 }),
+      }),
+    );
+
+    await expect(
+      service.deleteComment(11, 31, {
+        id: 1,
+        username: 'dad',
+        email: 'dad@example.com',
+        roles: [],
+        sessionId: 's1',
+      }),
+    ).rejects.toThrow(BusinessException);
+
+    expect(postCommentRepository.softDelete).not.toHaveBeenCalled();
+    expect(eventService.emitPostCommentDeleted).not.toHaveBeenCalled();
+  });
+
+  it('uses WebP image links and OSS snapshot poster links for videos', async () => {
     fileService.createTrustedAccessLink
       .mockResolvedValueOnce({
         url: '/api/v1/files/7/access?token=webp',
@@ -337,6 +453,11 @@ describe('FamilyService', () => {
       .mockResolvedValueOnce({
         url: '/api/v1/files/8/access?token=video',
         token: 'video',
+        expiresAt: '2026-05-04T00:00:00.000Z',
+      })
+      .mockResolvedValueOnce({
+        url: '/api/v1/files/8/access?token=poster',
+        token: 'poster',
         expiresAt: '2026-05-04T00:00:00.000Z',
       });
 
@@ -361,6 +482,7 @@ describe('FamilyService', () => {
           id: 8,
           mimeType: 'video/mp4',
           category: 'video',
+          storage: FileStorageType.OSS,
         }),
       }),
     ]);
@@ -379,9 +501,23 @@ describe('FamilyService', () => {
       8,
       expect.objectContaining({ disposition: 'inline', cacheMaxAgeSeconds: 30 * 24 * 60 * 60 }),
     );
+    expect(fileService.createTrustedAccessLink).toHaveBeenNthCalledWith(
+      3,
+      8,
+      expect.objectContaining({
+        disposition: 'inline',
+        process: 'video/snapshot,t_1000,f_jpg,w_720,m_fast',
+        cacheMaxAgeSeconds: 30 * 24 * 60 * 60,
+      }),
+    );
     expect(result).toEqual([
       expect.objectContaining({ fileId: 7, mediaType: 'image', displayUrl: expect.any(String) }),
-      expect.objectContaining({ fileId: 8, mediaType: 'video', displayUrl: expect.any(String) }),
+      expect.objectContaining({
+        fileId: 8,
+        mediaType: 'video',
+        displayUrl: expect.any(String),
+        posterUrl: '/api/v1/files/8/access?token=poster',
+      }),
     ]);
   });
 

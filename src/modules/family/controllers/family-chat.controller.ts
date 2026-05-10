@@ -1,4 +1,15 @@
-import { Body, Controller, Get, Post, Query } from '@nestjs/common';
+import {
+  Body,
+  Controller,
+  Delete,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseIntPipe,
+  Post,
+  Query,
+} from '@nestjs/common';
 import { ApiBearerAuth, ApiOperation, ApiTags } from '@nestjs/swagger';
 import { AllowAuthenticated } from '~/core/decorators';
 import { CurrentUser } from '~/modules/auth/decorators/current-user.decorator';
@@ -26,5 +37,15 @@ export class FamilyChatController {
     @CurrentUser() user: AuthenticatedUser,
   ) {
     return this.familyService.createChatMessage(dto, user);
+  }
+
+  @Delete(':id')
+  @HttpCode(HttpStatus.NO_CONTENT)
+  @ApiOperation({ summary: '删除家庭群聊消息' })
+  async deleteMessage(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    await this.familyService.deleteChatMessage(id, user);
   }
 }
