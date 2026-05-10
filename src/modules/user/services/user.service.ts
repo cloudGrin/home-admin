@@ -12,6 +12,7 @@ import { CacheService } from '~/shared/cache/cache.service';
 import { PaginationResult } from '~/common/types/pagination.types';
 import { RefreshTokenEntity } from '~/modules/auth/entities/refresh-token.entity';
 import { UserNotificationSettingEntity } from '~/modules/notification/entities/user-notification-setting.entity';
+import { FileService } from '~/modules/file/services/file.service';
 import { UserEntity } from '../entities/user.entity';
 import { RoleEntity } from '~/modules/role/entities/role.entity';
 import { CreateUserDto } from '../dto/create-user.dto';
@@ -23,6 +24,7 @@ import { UserStatus } from '~/common/enums/user.enum';
 
 const USER_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'username', 'email', 'lastLoginAt']);
 const USER_PERMISSION_CACHE_TTL_SECONDS = 1800;
+const USER_AVATAR_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const userPermissionsCacheKey = (userId: number) => `user:permissions:${userId}`;
 const SUPER_ADMIN_ROLE_CODE = 'super_admin';
 
@@ -46,6 +48,7 @@ export class UserService {
     private readonly notificationSettingRepository: Repository<UserNotificationSettingEntity>,
     private readonly logger: LoggerService,
     private readonly cache: CacheService,
+    private readonly fileService: FileService,
   ) {}
 
   /**
@@ -227,6 +230,36 @@ export class UserService {
       this.collectActivePermissionCodes(user);
 
     return user;
+  }
+
+  async findUserProfileById(id: number): Promise<UserEntity> {
+    return this.withTrustedAvatarUrl(await this.findUserById(id));
+  }
+
+  async withTrustedAvatarUrl<T extends { avatar?: string | null }>(user: T): Promise<T> {
+    const avatar = await this.resolveTrustedAvatarUrl(user.avatar);
+    if (avatar === user.avatar) {
+      return user;
+    }
+
+    return {
+      ...user,
+      avatar,
+    } as T;
+  }
+
+  async resolveTrustedAvatarUrl(avatar?: string | null): Promise<string | null | undefined> {
+    const fileId = this.extractAvatarFileId(avatar);
+    if (!fileId) {
+      return avatar;
+    }
+
+    const link = await this.fileService.createTrustedAccessLink(fileId, {
+      disposition: 'inline',
+      cacheMaxAgeSeconds: USER_AVATAR_CACHE_MAX_AGE_SECONDS,
+    });
+
+    return link.url;
   }
 
   /**
@@ -779,6 +812,25 @@ export class UserService {
       barkKey: null,
       feishuUserId: null,
     });
+  }
+
+  private extractAvatarFileId(avatar?: string | null): number | undefined {
+    if (!avatar) {
+      return undefined;
+    }
+
+    const value = avatar.trim();
+    if (!value.startsWith('/')) {
+      return undefined;
+    }
+
+    const match = value.match(/\/files\/(\d+)\/(?:public|access)(?:[/?#]|$)/);
+    if (!match) {
+      return undefined;
+    }
+
+    const fileId = Number(match[1]);
+    return Number.isSafeInteger(fileId) && fileId > 0 ? fileId : undefined;
   }
 
   private normalizeOptionalText(value?: string | null): string | null {

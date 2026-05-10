@@ -17,6 +17,7 @@ import {
 import { NotificationService } from '~/modules/notification/services/notification.service';
 import { AuthenticatedUser } from '~/modules/auth/strategies/jwt.strategy';
 import { UserEntity } from '~/modules/user/entities/user.entity';
+import { UserService } from '~/modules/user/services/user.service';
 import { LoggerService } from '~/shared/logger/logger.service';
 import {
   CompleteFamilyMediaDirectUploadDto,
@@ -99,6 +100,7 @@ export class FamilyService {
     @InjectRepository(UserEntity)
     private readonly userRepository: Repository<UserEntity>,
     private readonly fileService: FileService,
+    private readonly userService: UserService,
     private readonly notificationService: NotificationService,
     private readonly eventService: FamilyEventService,
     private readonly logger: LoggerService,
@@ -420,14 +422,14 @@ export class FamilyService {
       id: post.id,
       content: post.content,
       authorId: post.authorId,
-      author: this.toUserSummary(post.author),
+      author: await this.toUserSummary(post.author),
       media: await this.toMediaResponse(post.media ?? []),
-      comments: comments.map((comment) => this.toCommentResponse(comment)),
+      comments: await Promise.all(comments.map((comment) => this.toCommentResponse(comment))),
       likeCount: post.likes?.length ?? 0,
       likedByMe: (post.likes ?? []).some((like) => like.userId === currentUserId),
-      likedUsers: (post.likes ?? [])
-        .map((like) => this.toUserSummary(like.user))
-        .filter((user): user is FamilyUserSummaryDto => Boolean(user)),
+      likedUsers: (
+        await Promise.all((post.likes ?? []).map((like) => this.toUserSummary(like.user)))
+      ).filter((user): user is FamilyUserSummaryDto => Boolean(user)),
       createdAt: post.createdAt,
       updatedAt: post.updatedAt,
     };
@@ -440,14 +442,21 @@ export class FamilyService {
       id: message.id,
       content: message.content,
       senderId: message.senderId,
-      sender: this.toUserSummary(message.sender),
+      sender: await this.toUserSummary(message.sender),
       media: await this.toMediaResponse(message.media ?? []),
       createdAt: message.createdAt,
       updatedAt: message.updatedAt,
     };
   }
 
-  private toCommentResponse(comment: FamilyPostCommentEntity): FamilyPostCommentResponseDto {
+  private async toCommentResponse(
+    comment: FamilyPostCommentEntity,
+  ): Promise<FamilyPostCommentResponseDto> {
+    const [author, replyToUser] = await Promise.all([
+      this.toUserSummary(comment.author),
+      this.toUserSummary(comment.replyToUser),
+    ]);
+
     return {
       id: comment.id,
       postId: comment.postId,
@@ -455,14 +464,14 @@ export class FamilyService {
       replyToUserId: comment.replyToUserId ?? null,
       content: comment.content,
       authorId: comment.authorId,
-      author: this.toUserSummary(comment.author),
-      replyToUser: this.toUserSummary(comment.replyToUser) ?? null,
+      author,
+      replyToUser: replyToUser ?? null,
       createdAt: comment.createdAt,
       updatedAt: comment.updatedAt,
     };
   }
 
-  private toUserSummary(user?: UserEntity | null): FamilyUserSummaryDto | undefined {
+  private async toUserSummary(user?: UserEntity | null): Promise<FamilyUserSummaryDto | undefined> {
     if (!user) {
       return undefined;
     }
@@ -472,7 +481,7 @@ export class FamilyService {
       username: user.username,
       nickname: user.nickname,
       realName: user.realName,
-      avatar: user.avatar,
+      avatar: await this.userService.resolveTrustedAvatarUrl(user.avatar),
     };
   }
 
@@ -503,7 +512,7 @@ export class FamilyService {
   private async toAuthenticatedUserSummary(user: AuthenticatedUser): Promise<FamilyUserSummaryDto> {
     const entity = await this.userRepository.findOne({ where: { id: user.id } });
     return (
-      this.toUserSummary(entity) ?? {
+      (await this.toUserSummary(entity)) ?? {
         id: user.id,
         username: user.username,
         nickname: null,

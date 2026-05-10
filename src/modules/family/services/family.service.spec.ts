@@ -7,6 +7,7 @@ import { FileEntity, FileStorageType } from '~/modules/file/entities/file.entity
 import { FileService } from '~/modules/file/services/file.service';
 import { NotificationService } from '~/modules/notification/services/notification.service';
 import { UserEntity } from '~/modules/user/entities/user.entity';
+import { UserService } from '~/modules/user/services/user.service';
 import { LoggerService } from '~/shared/logger/logger.service';
 import { FamilyChatMessageMediaEntity } from '../entities/family-chat-message-media.entity';
 import { FamilyChatMessageEntity } from '../entities/family-chat-message.entity';
@@ -31,6 +32,7 @@ describe('FamilyService', () => {
   let notificationService: jest.Mocked<NotificationService>;
   let eventService: jest.Mocked<FamilyEventService>;
   let fileService: jest.Mocked<FileService>;
+  let userService: jest.Mocked<Pick<UserService, 'resolveTrustedAvatarUrl'>>;
   let logger: jest.Mocked<LoggerService>;
 
   beforeEach(async () => {
@@ -72,6 +74,12 @@ describe('FamilyService', () => {
             emitNotificationCreated: jest.fn(),
           },
         },
+        {
+          provide: UserService,
+          useValue: {
+            resolveTrustedAvatarUrl: jest.fn(async (avatar?: string | null) => avatar),
+          },
+        },
         { provide: LoggerService, useValue: createMockLogger() },
       ],
     }).compile();
@@ -88,6 +96,9 @@ describe('FamilyService', () => {
     notificationService = module.get(NotificationService);
     eventService = module.get(FamilyEventService);
     fileService = module.get(FileService);
+    userService = module.get(UserService) as jest.Mocked<
+      Pick<UserService, 'resolveTrustedAvatarUrl'>
+    >;
     logger = module.get(LoggerService);
 
     postRepository.create.mockImplementation((data) => data as FamilyPostEntity);
@@ -379,8 +390,11 @@ describe('FamilyService', () => {
       id: 4,
       username: 'mom',
       nickname: '妈妈',
-      avatar: 'https://example.com/mom.png',
+      avatar: '/api/v1/files/9/public',
     });
+    userService.resolveTrustedAvatarUrl.mockImplementation(async (avatar?: string | null) =>
+      avatar === '/api/v1/files/9/public' ? '/api/v1/files/9/access?token=avatar' : avatar,
+    );
     const post = Object.assign(new FamilyPostEntity(), {
       id: 11,
       content: '照片',
@@ -418,7 +432,7 @@ describe('FamilyService', () => {
           expect.objectContaining({
             id: 4,
             nickname: '妈妈',
-            avatar: 'https://example.com/mom.png',
+            avatar: '/api/v1/files/9/access?token=avatar',
           }),
         ],
       }),

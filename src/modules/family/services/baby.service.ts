@@ -8,6 +8,7 @@ import { FileEntity, FileStorageType } from '~/modules/file/entities/file.entity
 import { FileService } from '~/modules/file/services/file.service';
 import { AuthenticatedUser } from '~/modules/auth/strategies/jwt.strategy';
 import { UserEntity } from '~/modules/user/entities/user.entity';
+import { UserService } from '~/modules/user/services/user.service';
 import {
   BabyBirthdayContributionResponseDto,
   BabyBirthdayMediaResponseDto,
@@ -62,6 +63,7 @@ export class BabyService {
     @InjectRepository(UserEntity)
     private readonly userRepository: Repository<UserEntity>,
     private readonly fileService: FileService,
+    private readonly userService: UserService,
   ) {}
 
   async findOverview(): Promise<BabyOverviewResponseDto> {
@@ -462,7 +464,7 @@ export class BabyService {
       id: contribution.id,
       birthdayId: contribution.birthdayId,
       authorId: contribution.authorId,
-      author: this.toUserSummary(contribution.author),
+      author: await this.toUserSummary(contribution.author),
       content: contribution.content ?? null,
       media: await Promise.all(
         (contribution.media ?? []).map((item) => this.toMediaResponse(item)),
@@ -486,7 +488,7 @@ export class BabyService {
       fileId: media.fileId,
       contributionId: media.contributionId ?? null,
       uploaderId: media.uploaderId,
-      uploader: this.toUserSummary(media.uploader),
+      uploader: await this.toUserSummary(media.uploader),
       sort: media.sort,
       originalName: media.file?.originalName,
       mimeType: media.file?.mimeType,
@@ -497,7 +499,7 @@ export class BabyService {
     };
   }
 
-  private toUserSummary(user?: UserEntity | null) {
+  private async toUserSummary(user?: UserEntity | null) {
     if (!user) {
       return undefined;
     }
@@ -507,7 +509,7 @@ export class BabyService {
       username: user.username,
       nickname: user.nickname,
       realName: user.realName,
-      avatar: user.avatar,
+      avatar: await this.userService.resolveTrustedAvatarUrl(user.avatar),
     };
   }
 

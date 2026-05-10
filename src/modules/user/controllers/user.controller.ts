@@ -74,7 +74,7 @@ export class UserController {
   @ApiForbiddenResponse({ description: '用户无权限访问该资源' })
   @ApiNotFoundResponse({ description: '请求的资源不存在' })
   async getProfile(@CurrentUser() user: AuthenticatedUser) {
-    return this.userService.findUserById(user.id);
+    return this.userService.findUserProfileById(user.id);
   }
 
   @Put('profile')
@@ -86,7 +86,9 @@ export class UserController {
   @ApiForbiddenResponse({ description: '用户无权限访问该资源' })
   @ApiNotFoundResponse({ description: '请求的资源不存在' })
   async updateProfile(@CurrentUser() user: AuthenticatedUser, @Body() dto: UpdateProfileDto) {
-    return this.userService.updateUser(user.id, dto, user);
+    return this.userService.withTrustedAvatarUrl(
+      await this.userService.updateUser(user.id, dto, user),
+    );
   }
 
   @Put('password')

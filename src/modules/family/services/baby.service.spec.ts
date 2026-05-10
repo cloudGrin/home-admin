@@ -6,6 +6,7 @@ import { createMockRepository } from '~/test-utils';
 import { FileEntity, FileStorageType } from '~/modules/file/entities/file.entity';
 import { FileService } from '~/modules/file/services/file.service';
 import { UserEntity } from '~/modules/user/entities/user.entity';
+import { UserService } from '~/modules/user/services/user.service';
 import {
   BabyBirthdayContributionEntity,
   BabyBirthdayEntity,
@@ -24,6 +25,7 @@ describe('BabyService', () => {
   let mediaRepository: jest.Mocked<Repository<BabyBirthdayMediaEntity>>;
   let fileRepository: jest.Mocked<Repository<FileEntity>>;
   let fileService: jest.Mocked<FileService>;
+  let userService: jest.Mocked<Pick<UserService, 'resolveTrustedAvatarUrl'>>;
 
   beforeEach(async () => {
     const module: TestingModule = await Test.createTestingModule({
@@ -46,6 +48,12 @@ describe('BabyService', () => {
             createTrustedAccessLink: jest.fn(),
           },
         },
+        {
+          provide: UserService,
+          useValue: {
+            resolveTrustedAvatarUrl: jest.fn(async (avatar?: string | null) => avatar),
+          },
+        },
       ],
     }).compile();
 
@@ -57,6 +65,9 @@ describe('BabyService', () => {
     mediaRepository = module.get(getRepositoryToken(BabyBirthdayMediaEntity));
     fileRepository = module.get(getRepositoryToken(FileEntity));
     fileService = module.get(FileService);
+    userService = module.get(UserService) as jest.Mocked<
+      Pick<UserService, 'resolveTrustedAvatarUrl'>
+    >;
 
     profileRepository.create.mockImplementation((data) => data as BabyProfileEntity);
     profileRepository.save.mockImplementation(async (data) =>
@@ -225,6 +236,40 @@ describe('BabyService', () => {
 
     await expect(service.createBirthday({ year: 2027, title: '一周岁生日' })).rejects.toThrow(
       BusinessException,
+    );
+  });
+
+  it('uses trusted avatar links for birthday contribution authors', async () => {
+    profileRepository.findOne.mockResolvedValue(null);
+    growthRepository.find.mockResolvedValue([]);
+    birthdayRepository.find.mockResolvedValue([
+      Object.assign(new BabyBirthdayEntity(), {
+        id: 21,
+        year: 2027,
+        title: '一周岁生日',
+        media: [],
+        contributions: [
+          Object.assign(new BabyBirthdayContributionEntity(), {
+            id: 51,
+            content: '生日快乐',
+            author: Object.assign(new UserEntity(), {
+              id: 3,
+              username: 'mom',
+              nickname: '妈妈',
+              avatar: '/api/v1/files/50/public',
+            }),
+            media: [],
+          }),
+        ],
+      }),
+    ]);
+    userService.resolveTrustedAvatarUrl.mockResolvedValue('/api/v1/files/50/access?token=avatar');
+
+    const overview = await service.findOverview();
+
+    expect(userService.resolveTrustedAvatarUrl).toHaveBeenCalledWith('/api/v1/files/50/public');
+    expect(overview.birthdays[0].contributions[0].author?.avatar).toBe(
+      '/api/v1/files/50/access?token=avatar',
     );
   });
 

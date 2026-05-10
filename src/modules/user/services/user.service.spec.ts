@@ -13,6 +13,7 @@ import { RefreshTokenEntity } from '~/modules/auth/entities/refresh-token.entity
 import { UserNotificationSettingEntity } from '~/modules/notification/entities/user-notification-setting.entity';
 import { LoggerService } from '~/shared/logger/logger.service';
 import { CacheService } from '~/shared/cache/cache.service';
+import { FileService } from '~/modules/file/services/file.service';
 import {
   UserMockFactory,
   RoleMockFactory,
@@ -46,6 +47,7 @@ describe('UserService', () => {
   let roleRepository: jest.Mocked<any>;
   let refreshTokenRepository: jest.Mocked<any>;
   let notificationSettingRepository: jest.Mocked<any>;
+  let fileService: jest.Mocked<Pick<FileService, 'createTrustedAccessLink'>>;
   let cache: jest.Mocked<CacheService>;
   let logger: jest.Mocked<LoggerService>;
 
@@ -54,6 +56,9 @@ describe('UserService', () => {
     const mockRoleRepository = createMockRepository<RoleEntity>();
     const mockRefreshTokenRepository = createMockRepository<RefreshTokenEntity>();
     const mockNotificationSettingRepository = createMockRepository<UserNotificationSettingEntity>();
+    const mockFileService = {
+      createTrustedAccessLink: jest.fn(),
+    };
     const mockCache = createMockCacheService();
     const mockLogger = createMockLogger();
 
@@ -84,6 +89,10 @@ describe('UserService', () => {
           provide: CacheService,
           useValue: mockCache,
         },
+        {
+          provide: FileService,
+          useValue: mockFileService,
+        },
       ],
     }).compile();
 
@@ -92,6 +101,9 @@ describe('UserService', () => {
     roleRepository = module.get(getRepositoryToken(RoleEntity));
     refreshTokenRepository = module.get(getRepositoryToken(RefreshTokenEntity));
     notificationSettingRepository = module.get(getRepositoryToken(UserNotificationSettingEntity));
+    fileService = module.get(FileService) as jest.Mocked<
+      Pick<FileService, 'createTrustedAccessLink'>
+    >;
     cache = module.get(CacheService);
     logger = module.get(LoggerService);
   });
@@ -339,6 +351,24 @@ describe('UserService', () => {
       userRepository.findOne.mockResolvedValue(null);
 
       await expect(service.findUserById(1)).rejects.toThrow(NotFoundException);
+    });
+
+    it('为当前用户资料中的本地头像生成30天私有缓存链接', async () => {
+      const user = UserMockFactory.create({ id: 1, avatar: '/api/v1/files/9/public' });
+      userRepository.findOne.mockResolvedValue(user);
+      fileService.createTrustedAccessLink.mockResolvedValue({
+        url: '/api/v1/files/9/access?token=avatar',
+        token: 'avatar',
+        expiresAt: '2026-06-01T00:00:00.000Z',
+      });
+
+      const result = await service.findUserProfileById(1);
+
+      expect(fileService.createTrustedAccessLink).toHaveBeenCalledWith(9, {
+        disposition: 'inline',
+        cacheMaxAgeSeconds: 30 * 24 * 60 * 60,
+      });
+      expect(result.avatar).toBe('/api/v1/files/9/access?token=avatar');
     });
   });
 

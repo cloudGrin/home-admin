@@ -7,6 +7,7 @@ import { LessThan, Repository } from 'typeorm';
 import { LoggerService } from '~/shared/logger/logger.service';
 import { CacheService } from '~/shared/cache/cache.service';
 import { UserEntity } from '~/modules/user/entities/user.entity';
+import { UserService } from '~/modules/user/services/user.service';
 import { RefreshTokenEntity } from '../entities/refresh-token.entity';
 import { LoginDto } from '../dto/login.dto';
 import { RefreshTokenDto } from '../dto/refresh-token.dto';
@@ -72,6 +73,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     private readonly logger: LoggerService,
     private readonly cache: CacheService,
+    private readonly userService: UserService,
   ) {
     this.accessTokenSecret = this.configService.get('jwt.secret') || 'default-secret';
     this.accessTokenExpiresIn = this.configService.get('jwt.expiresIn') || '7d';
@@ -188,7 +190,7 @@ export class AuthService {
     this.logger.log(`User ${user.username} logged in from ${ipAddress}`);
 
     return {
-      user: this.toAuthUserResponse(user),
+      user: await this.toAuthUserResponse(user),
       tokens,
     };
   }
@@ -546,7 +548,7 @@ export class AuthService {
     return user;
   }
 
-  private toAuthUserResponse(user: UserEntity): AuthUserResponse {
+  private async toAuthUserResponse(user: UserEntity): Promise<AuthUserResponse> {
     const roles = (user.roles || []).map((role) => ({
       id: role.id,
       code: role.code,
@@ -561,7 +563,7 @@ export class AuthService {
       email: user.email,
       realName: user.realName,
       nickname: user.nickname,
-      avatar: user.avatar,
+      avatar: (await this.userService.resolveTrustedAvatarUrl(user.avatar)) ?? undefined,
       phone: user.phone,
       status: user.status,
       roles,

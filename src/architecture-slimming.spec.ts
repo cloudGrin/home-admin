@@ -794,6 +794,16 @@ describe('architecture slimming', () => {
     expect(permissionsGuard).not.toContain('clearUserPermissionsCache');
   });
 
+  it('keeps family-facing user avatar responses on trusted access links', () => {
+    const familyService = readSource('modules/family/services/family.service.ts');
+    const babyService = readSource('modules/family/services/baby.service.ts');
+
+    for (const content of [familyService, babyService]) {
+      expect(content).not.toContain('avatar: user.avatar');
+      expect(content).toContain('resolveTrustedAvatarUrl');
+    }
+  });
+
   it('removes unused crypto helpers, duplicate multer ambient types, and unused permission service reads', () => {
     const cryptoUtil = readSource('common/utils/crypto.util.ts');
     const permissionService = readSource('modules/permission/services/permission.service.ts');

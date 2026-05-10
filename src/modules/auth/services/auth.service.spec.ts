@@ -7,6 +7,7 @@ import { AuthService } from './auth.service';
 import { LoggerService } from '~/shared/logger/logger.service';
 import { CacheService } from '~/shared/cache/cache.service';
 import { UserEntity } from '~/modules/user/entities/user.entity';
+import { UserService } from '~/modules/user/services/user.service';
 import { RefreshTokenEntity } from '../entities/refresh-token.entity';
 import { LoginDto } from '../dto/login.dto';
 import { RefreshTokenDto } from '../dto/refresh-token.dto';
@@ -121,6 +122,10 @@ describe('AuthService', () => {
       incr: jest.fn(),
     };
 
+    const mockUserService = {
+      resolveTrustedAvatarUrl: jest.fn(async (avatar?: string | null) => avatar),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -130,6 +135,7 @@ describe('AuthService', () => {
         { provide: ConfigService, useValue: mockConfigService },
         { provide: LoggerService, useValue: mockLogger },
         { provide: CacheService, useValue: mockCacheService },
+        { provide: UserService, useValue: mockUserService },
       ],
     }).compile();
 
