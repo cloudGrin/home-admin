@@ -81,6 +81,7 @@ remaining small enough for a personal deployment.
 - API applications with scoped API keys.
 - One-time raw key generation.
 - API key guard and scope decorators.
+- Open APIs are thin adapters over existing services, with independent DTOs and explicit scopes.
 - Access logs with path, status, key, and request metadata.
 - Open API scope discovery for frontend integration docs.
 - Current open API: public user list at `/api/v1/open/users`.
