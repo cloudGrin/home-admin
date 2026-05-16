@@ -1,8 +1,10 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { JwtService } from '@nestjs/jwt';
 import { ConfigService } from '@nestjs/config';
-import { UnauthorizedException } from '@nestjs/common';
+import { ConflictException, UnauthorizedException } from '@nestjs/common';
+import { HttpService } from '@nestjs/axios';
 import { getRepositoryToken } from '@nestjs/typeorm';
+import { of } from 'rxjs';
 import { AuthService } from './auth.service';
 import { LoggerService } from '~/shared/logger/logger.service';
 import { CacheService } from '~/shared/cache/cache.service';
@@ -35,6 +37,7 @@ describe('AuthService', () => {
   let userRepository: any;
   let refreshTokenRepository: any;
   let jwtService: jest.Mocked<JwtService>;
+  let httpService: jest.Mocked<HttpService>;
   let logger: jest.Mocked<LoggerService>;
   let cacheService: jest.Mocked<CacheService>;
 
@@ -77,6 +80,7 @@ describe('AuthService', () => {
   beforeEach(async () => {
     const mockUserRepository = {
       createQueryBuilder: jest.fn(),
+      findOne: jest.fn(),
       save: jest.fn(),
       update: jest.fn(),
       increment: jest.fn(),
@@ -103,6 +107,8 @@ describe('AuthService', () => {
           'jwt.expiresIn': '15m',
           'jwt.refreshSecret': 'test-refresh-secret',
           'jwt.refreshExpiresIn': '30d',
+          'weapp.appId': 'wx-test-app',
+          'weapp.appSecret': 'wx-test-secret',
         };
         return config[key];
       }),
@@ -126,6 +132,10 @@ describe('AuthService', () => {
       resolveTrustedAvatarUrl: jest.fn(async (avatar?: string | null) => avatar),
     };
 
+    const mockHttpService = {
+      get: jest.fn(),
+    };
+
     const module: TestingModule = await Test.createTestingModule({
       providers: [
         AuthService,
@@ -136,6 +146,7 @@ describe('AuthService', () => {
         { provide: LoggerService, useValue: mockLogger },
         { provide: CacheService, useValue: mockCacheService },
         { provide: UserService, useValue: mockUserService },
+        { provide: HttpService, useValue: mockHttpService },
       ],
     }).compile();
 
@@ -143,6 +154,7 @@ describe('AuthService', () => {
     userRepository = module.get(getRepositoryToken(UserEntity));
     refreshTokenRepository = module.get(getRepositoryToken(RefreshTokenEntity));
     jwtService = module.get(JwtService);
+    httpService = module.get(HttpService);
     logger = module.get(LoggerService);
     cacheService = module.get(CacheService);
   });
@@ -352,6 +364,139 @@ describe('AuthService', () => {
       await expect(service.login(mockLoginDto, mockIp, mockUserAgent)).rejects.toThrow(
         '账户已被禁用',
       );
+    });
+  });
+
+  describe('weapp login and bind', () => {
+    const mockIp = '192.168.1.100';
+    const mockUserAgent = 'MicroMessenger';
+
+    beforeEach(() => {
+      httpService.get.mockReturnValue(of({ data: { openid: 'openid-1' } }) as any);
+    });
+
+    it('logs in an already-bound WeChat mini-program user', async () => {
+      const mockUser = createMockUser({
+        username: 'family-user',
+        status: UserStatus.ACTIVE,
+        weappOpenid: 'openid-1',
+      } as Partial<UserEntity>);
+      const refreshTokenEntity = createMockRefreshToken();
+
+      userRepository.findOne.mockResolvedValue(mockUser);
+      userRepository.update.mockResolvedValue(undefined);
+      jwtService.signAsync
+        .mockResolvedValueOnce('mock-access-token')
+        .mockResolvedValueOnce('mock-refresh-token');
+      refreshTokenRepository.create.mockReturnValue(refreshTokenEntity);
+      refreshTokenRepository.save.mockResolvedValue(refreshTokenEntity);
+
+      const result = await service.loginWithWeappCode({ code: 'wx-code' }, mockIp, mockUserAgent);
+
+      expect(result.tokens.accessToken).toBe('mock-access-token');
+      expect(userRepository.findOne).toHaveBeenCalledWith({
+        where: { weappOpenid: 'openid-1' },
+        relations: ['roles', 'roles.permissions'],
+      });
+    });
+
+    it('rejects silent login when the WeChat openid is not bound', async () => {
+      userRepository.findOne.mockResolvedValue(null);
+
+      await expect(
+        service.loginWithWeappCode({ code: 'wx-code' }, mockIp, mockUserAgent),
+      ).rejects.toThrow('微信账号未绑定');
+    });
+
+    it('rejects silent login when the bound account is locked', async () => {
+      const mockUser = createMockUser({
+        username: 'family-user',
+        status: UserStatus.ACTIVE,
+        weappOpenid: 'openid-1',
+        lockedUntil: new Date(Date.now() + 30 * 60 * 1000),
+      } as Partial<UserEntity>);
+      (mockUser.isLocked as jest.Mock).mockReturnValue(true);
+      userRepository.findOne.mockResolvedValue(mockUser);
+
+      await expect(
+        service.loginWithWeappCode({ code: 'wx-code' }, mockIp, mockUserAgent),
+      ).rejects.toThrow('账户已被锁定');
+
+      expect(jwtService.signAsync).not.toHaveBeenCalled();
+      expect(refreshTokenRepository.create).not.toHaveBeenCalled();
+    });
+
+    it('binds an existing account to the WeChat openid and returns tokens', async () => {
+      const mockUser = createMockUser({
+        username: 'family-user',
+        status: UserStatus.ACTIVE,
+        weappOpenid: null,
+      } as Partial<UserEntity>);
+      const qb = createUserLoginQueryBuilder();
+      qb.getOne.mockResolvedValue(mockUser);
+      const refreshTokenEntity = createMockRefreshToken();
+
+      userRepository.findOne.mockResolvedValue(null);
+      userRepository.createQueryBuilder.mockReturnValue(qb);
+      userRepository.update.mockResolvedValue(undefined);
+      jwtService.signAsync
+        .mockResolvedValueOnce('mock-access-token')
+        .mockResolvedValueOnce('mock-refresh-token');
+      refreshTokenRepository.create.mockReturnValue(refreshTokenEntity);
+      refreshTokenRepository.save.mockResolvedValue(refreshTokenEntity);
+
+      const result = await service.bindWeappAccount(
+        { code: 'wx-code', account: 'family-user', password: 'Password123!' },
+        mockIp,
+        mockUserAgent,
+      );
+
+      expect(result.tokens.refreshToken).toBe('mock-refresh-token');
+      expect(userRepository.update).toHaveBeenCalledWith(
+        mockUser.id,
+        expect.objectContaining({ lastLoginIp: mockIp }),
+      );
+      expect(userRepository.update).toHaveBeenCalledWith(
+        { id: mockUser.id },
+        {
+          weappOpenid: 'openid-1',
+          weappBoundAt: expect.any(Date),
+        },
+      );
+      expect(userRepository.save).not.toHaveBeenCalled();
+    });
+
+    it('rejects binding when the WeChat openid belongs to another account', async () => {
+      userRepository.findOne.mockResolvedValue(createMockUser({ id: 99 } as Partial<UserEntity>));
+
+      await expect(
+        service.bindWeappAccount(
+          { code: 'wx-code', account: 'family-user', password: 'Password123!' },
+          mockIp,
+          mockUserAgent,
+        ),
+      ).rejects.toThrow(ConflictException);
+    });
+
+    it('rejects binding when the account already has another WeChat openid', async () => {
+      const mockUser = createMockUser({
+        username: 'family-user',
+        status: UserStatus.ACTIVE,
+        weappOpenid: 'openid-other',
+      } as Partial<UserEntity>);
+      const qb = createUserLoginQueryBuilder();
+      qb.getOne.mockResolvedValue(mockUser);
+
+      userRepository.findOne.mockResolvedValue(null);
+      userRepository.createQueryBuilder.mockReturnValue(qb);
+
+      await expect(
+        service.bindWeappAccount(
+          { code: 'wx-code', account: 'family-user', password: 'Password123!' },
+          mockIp,
+          mockUserAgent,
+        ),
+      ).rejects.toThrow('该账号已绑定其他微信账号');
     });
   });
 

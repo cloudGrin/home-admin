@@ -132,6 +132,14 @@ export const configuration = (): Configuration => ({
   },
 
   /**
+   * 微信小程序配置
+   */
+  weapp: {
+    appId: process.env.WEAPP_APP_ID,
+    appSecret: process.env.WEAPP_APP_SECRET,
+  },
+
+  /**
    * 日志配置
    */
   logging: {

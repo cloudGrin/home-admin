@@ -116,6 +116,12 @@ export const configValidationSchema = Joi.object({
   JWT_REFRESH_EXPIRES_IN: Joi.string().default('30d'),
 
   // ========================================
+  // 微信小程序配置（可选，未配置时相关接口不可用）
+  // ========================================
+  WEAPP_APP_ID: optionalEmptyString,
+  WEAPP_APP_SECRET: optionalEmptyString,
+
+  // ========================================
   // 日志配置
   // ========================================
   LOG_LEVEL: Joi.string().valid('debug', 'info', 'warn', 'error').default('debug'),

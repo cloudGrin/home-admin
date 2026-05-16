@@ -40,4 +40,17 @@ describe('AuthController', () => {
 
     expect(authService.logout).toHaveBeenCalledWith(1, 'bad-refresh-token', 'access-session');
   });
+
+  it('exposes WeChat mini-program login and bind routes', () => {
+    const routeMethods = Object.getOwnPropertyNames(AuthController.prototype).filter(
+      (name) => name !== 'constructor',
+    );
+
+    const paths = routeMethods
+      .map((name) => Reflect.getMetadata(PATH_METADATA, AuthController.prototype[name]))
+      .filter(Boolean);
+
+    expect(paths).toContain('weapp/login');
+    expect(paths).toContain('weapp/bind');
+  });
 });

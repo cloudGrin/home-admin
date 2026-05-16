@@ -34,6 +34,14 @@ export interface JwtConfig {
 }
 
 /**
+ * 微信小程序配置
+ */
+export interface WeappConfig {
+  appId?: string;
+  appSecret?: string;
+}
+
+/**
  * 日志配置
  */
 export interface LoggingConfig {
@@ -123,6 +131,7 @@ export interface Configuration {
   throttle: ThrottleConfig;
   file: FileConfig;
   notification: NotificationConfig;
+  weapp: WeappConfig;
   isDevelopment: boolean;
   isProduction: boolean;
   isTest: boolean;

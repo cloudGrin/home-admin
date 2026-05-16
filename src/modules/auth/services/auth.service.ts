@@ -1,9 +1,11 @@
-import { Injectable, UnauthorizedException } from '@nestjs/common';
+import { ConflictException, Injectable, UnauthorizedException } from '@nestjs/common';
+import { HttpService } from '@nestjs/axios';
 import { JwtService } from '@nestjs/jwt';
 import { InjectRepository } from '@nestjs/typeorm';
 import { TooManyRequestsException } from '../exceptions/too-many-requests.exception';
 import { ConfigService } from '@nestjs/config';
 import { LessThan, Repository } from 'typeorm';
+import { firstValueFrom } from 'rxjs';
 import { LoggerService } from '~/shared/logger/logger.service';
 import { CacheService } from '~/shared/cache/cache.service';
 import { UserEntity } from '~/modules/user/entities/user.entity';
@@ -11,6 +13,8 @@ import { UserService } from '~/modules/user/services/user.service';
 import { RefreshTokenEntity } from '../entities/refresh-token.entity';
 import { LoginDto } from '../dto/login.dto';
 import { RefreshTokenDto } from '../dto/refresh-token.dto';
+import { WeappLoginDto } from '../dto/weapp-login.dto';
+import { WeappBindDto } from '../dto/weapp-bind.dto';
 import { UserStatus } from '~/common/enums/user.enum';
 import { StringUtil } from '~/common/utils';
 import { getExpiresInSeconds, hashRefreshToken } from './token-revocation.util';
@@ -57,6 +61,12 @@ export interface AuthResponse {
   tokens: AuthTokens;
 }
 
+interface WeappSessionResponse {
+  openid?: string;
+  errcode?: number;
+  errmsg?: string;
+}
+
 @Injectable()
 export class AuthService {
   private readonly accessTokenSecret: string;
@@ -74,6 +84,7 @@ export class AuthService {
     private readonly logger: LoggerService,
     private readonly cache: CacheService,
     private readonly userService: UserService,
+    private readonly httpService: HttpService,
   ) {
     this.accessTokenSecret = this.configService.get('jwt.secret') || 'default-secret';
     this.accessTokenExpiresIn = this.configService.get('jwt.expiresIn') || '7d';
@@ -86,6 +97,71 @@ export class AuthService {
    * 用户登录
    */
   async login(dto: LoginDto, ipAddress?: string, userAgent?: string): Promise<AuthResponse> {
+    const user = await this.validateUserCredentials(dto, ipAddress, userAgent);
+    return this.createAuthResponse(user, ipAddress, userAgent);
+  }
+
+  async loginWithWeappCode(
+    dto: WeappLoginDto,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<AuthResponse> {
+    const openid = await this.resolveWeappOpenid(dto.code);
+    const user = await this.userRepository.findOne({
+      where: { weappOpenid: openid },
+      relations: ['roles', 'roles.permissions'],
+    });
+
+    if (!user) {
+      throw new UnauthorizedException('微信账号未绑定');
+    }
+
+    this.ensureUserCanLogin(user, user.username, ipAddress, userAgent);
+
+    return this.createAuthResponse(user, ipAddress, userAgent);
+  }
+
+  async bindWeappAccount(
+    dto: WeappBindDto,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<AuthResponse> {
+    const openid = await this.resolveWeappOpenid(dto.code);
+    const boundUser = await this.userRepository.findOne({
+      where: { weappOpenid: openid },
+      relations: ['roles'],
+    });
+
+    if (boundUser) {
+      throw new ConflictException('该微信账号已绑定其他用户');
+    }
+
+    const user = await this.validateUserCredentials(
+      { account: dto.account, password: dto.password },
+      ipAddress,
+      userAgent,
+    );
+
+    if (user.weappOpenid && user.weappOpenid !== openid) {
+      throw new ConflictException('该账号已绑定其他微信账号');
+    }
+
+    await this.userRepository.update(
+      { id: user.id },
+      {
+        weappOpenid: openid,
+        weappBoundAt: new Date(),
+      },
+    );
+
+    return this.createAuthResponse(user, ipAddress, userAgent);
+  }
+
+  private async validateUserCredentials(
+    dto: LoginDto,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<UserEntity> {
     // 1. 暴力破解防护：检查IP限制
     if (ipAddress) {
       const ipKey = `login:attempts:ip:${ipAddress}`;
@@ -123,27 +199,7 @@ export class AuthService {
       throw new TooManyRequestsException(`该账户登录失败次数过多，请${lockMinutes}分钟后再试`);
     }
 
-    // 检查用户是否被锁定
-    if (user.isLocked()) {
-      if (user.lockedUntil && user.lockedUntil > new Date()) {
-        const minutes = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000);
-        this.emitLoginFailure(account, ipAddress, userAgent, '账户被锁定');
-        throw new UnauthorizedException(`账户已被锁定，请${minutes}分钟后再试`);
-      }
-      this.emitLoginFailure(account, ipAddress, userAgent, '账户被锁定');
-      throw new UnauthorizedException('账户已被锁定');
-    }
-
-    // 检查用户状态
-    if (user.status === UserStatus.DISABLED) {
-      this.emitLoginFailure(account, ipAddress, userAgent, '账户被禁用');
-      throw new UnauthorizedException('账户已被禁用');
-    }
-
-    if (user.status === UserStatus.INACTIVE) {
-      this.emitLoginFailure(account, ipAddress, userAgent, '账户未激活');
-      throw new UnauthorizedException('账户未激活');
-    }
+    this.ensureUserCanLogin(user, account, ipAddress, userAgent);
 
     // 5. 验证密码
     const isPasswordValid = await user.validatePassword(inputPassword);
@@ -183,16 +239,7 @@ export class AuthService {
     // 更新登录信息
     await this.updateLoginInfo(user.id, ipAddress || '');
 
-    // 生成令牌
-    const sessionId = StringUtil.shortUuid();
-    const tokens = await this.generateTokens(user, ipAddress, userAgent, sessionId);
-
-    this.logger.log(`User ${user.username} logged in from ${ipAddress}`);
-
-    return {
-      user: await this.toAuthUserResponse(user),
-      tokens,
-    };
+    return user;
   }
 
   /**
@@ -508,6 +555,87 @@ export class AuthService {
     await this.cache.incr(`login:attempts:ip:${ipAddress}`, 30 * 60);
   }
 
+  private async createAuthResponse(
+    user: UserEntity,
+    ipAddress?: string,
+    userAgent?: string,
+  ): Promise<AuthResponse> {
+    const sessionId = StringUtil.shortUuid();
+    const tokens = await this.generateTokens(user, ipAddress, userAgent, sessionId);
+
+    this.logger.log(`User ${user.username} logged in from ${ipAddress}`);
+
+    return {
+      user: await this.toAuthUserResponse(user),
+      tokens,
+    };
+  }
+
+  private ensureUserCanLogin(
+    user: UserEntity,
+    account: string,
+    ipAddress?: string,
+    userAgent?: string,
+  ): void {
+    if (user.isLocked()) {
+      if (user.lockedUntil && user.lockedUntil > new Date()) {
+        const minutes = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 60000);
+        this.emitLoginFailure(account, ipAddress, userAgent, '账户被锁定');
+        throw new UnauthorizedException(`账户已被锁定，请${minutes}分钟后再试`);
+      }
+      this.emitLoginFailure(account, ipAddress, userAgent, '账户被锁定');
+      throw new UnauthorizedException('账户已被锁定');
+    }
+
+    if (user.status === UserStatus.DISABLED) {
+      this.emitLoginFailure(account, ipAddress, userAgent, '账户被禁用');
+      throw new UnauthorizedException('账户已被禁用');
+    }
+
+    if (user.status === UserStatus.INACTIVE) {
+      this.emitLoginFailure(account, ipAddress, userAgent, '账户未激活');
+      throw new UnauthorizedException('账户未激活');
+    }
+  }
+
+  private async resolveWeappOpenid(code: string): Promise<string> {
+    const appId = this.configService.get<string>('weapp.appId');
+    const appSecret = this.configService.get<string>('weapp.appSecret');
+
+    if (!appId || !appSecret) {
+      throw new UnauthorizedException('微信小程序登录未配置');
+    }
+
+    try {
+      const response = await firstValueFrom(
+        this.httpService.get<WeappSessionResponse>(
+          'https://api.weixin.qq.com/sns/jscode2session',
+          {
+            params: {
+              appid: appId,
+              secret: appSecret,
+              js_code: code,
+              grant_type: 'authorization_code',
+            },
+          },
+        ),
+      );
+      const data = response.data;
+
+      if (data.errcode || !data.openid) {
+        throw new UnauthorizedException('微信登录凭证无效');
+      }
+
+      return data.openid;
+    } catch (error) {
+      if (error instanceof UnauthorizedException) {
+        throw error;
+      }
+
+      throw new UnauthorizedException('微信登录凭证无效');
+    }
+  }
+
   private async revokeAllAccessSessions(userId: number): Promise<void> {
     await this.userRepository.increment({ id: userId }, 'tokenVersion', 1);
   }
@@ -519,7 +647,7 @@ export class AuthService {
   private async findUserForLogin(account: string): Promise<UserEntity | null> {
     let user = await this.userRepository
       .createQueryBuilder('user')
-      .addSelect(['user.password'])
+      .addSelect(['user.password', 'user.weappOpenid', 'user.weappBoundAt'])
       .leftJoinAndSelect('user.roles', 'role')
       .leftJoinAndSelect('role.permissions', 'permission')
       .where('user.username = :account', { account })
@@ -528,7 +656,7 @@ export class AuthService {
     if (!user) {
       user = await this.userRepository
         .createQueryBuilder('user')
-        .addSelect(['user.password'])
+        .addSelect(['user.password', 'user.weappOpenid', 'user.weappBoundAt'])
         .leftJoinAndSelect('user.roles', 'role')
         .leftJoinAndSelect('role.permissions', 'permission')
         .where('user.email = :account', { account })
@@ -538,7 +666,7 @@ export class AuthService {
     if (!user && /^\d{11}$/.test(account)) {
       user = await this.userRepository
         .createQueryBuilder('user')
-        .addSelect(['user.password'])
+        .addSelect(['user.password', 'user.weappOpenid', 'user.weappBoundAt'])
         .leftJoinAndSelect('user.roles', 'role')
         .leftJoinAndSelect('role.permissions', 'permission')
         .where('user.phone = :account', { account })

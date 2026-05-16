@@ -66,6 +66,26 @@ export class UserEntity extends SoftDeleteBaseEntity {
   phone?: string;
 
   @Column({
+    name: 'weapp_openid',
+    type: 'varchar',
+    length: 64,
+    nullable: true,
+    unique: true,
+    select: false,
+    comment: '微信小程序 openid',
+  })
+  weappOpenid?: string | null;
+
+  @Column({
+    name: 'weapp_bound_at',
+    type: 'timestamp',
+    nullable: true,
+    select: false,
+    comment: '微信小程序绑定时间',
+  })
+  weappBoundAt?: Date | null;
+
+  @Column({
     type: 'enum',
     enum: UserGender,
     default: UserGender.UNKNOWN,
