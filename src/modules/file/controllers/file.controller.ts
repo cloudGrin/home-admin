@@ -285,13 +285,18 @@ export class FileController {
     // 权限检查：如果文件不是公开的，需要验证访问权限
     this.fileService.checkDownloadPermission(file, user);
 
-    const stream = await this.fileService.getDownloadStream(id);
-    res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+    const result = await this.fileService.getDownloadResult(id, 'attachment');
+    if (result.redirectUrl) {
+      res.redirect(302, result.redirectUrl);
+      return;
+    }
+
+    res.setHeader('Content-Type', result.file.mimeType || 'application/octet-stream');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename*=UTF-8''${encodeURIComponent(file.originalName)}`,
+      `attachment; filename*=UTF-8''${encodeURIComponent(result.file.originalName)}`,
     );
 
-    return new StreamableFile(stream as any);
+    return new StreamableFile(result.stream as any);
   }
 }

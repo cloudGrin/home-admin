@@ -604,6 +604,42 @@ describe('FileService', () => {
       );
     });
 
+    it('redirects public OSS non-image downloads to a CDN-capable signed URL', async () => {
+      const file = {
+        id: 16,
+        originalName: 'manual.pdf',
+        path: 'public/manual.pdf',
+        mimeType: 'application/pdf',
+        category: 'document',
+        storage: FileStorageType.OSS,
+        isPublic: true,
+        url: '/api/v1/files/16/public',
+      } as FileEntity;
+      repository.findOne.mockResolvedValue(file);
+
+      const result = await service.getPublicDownload(16);
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          file,
+          redirectUrl: 'https://oss.example.com/download-signature',
+          cacheMaxAgeSeconds: 30 * 24 * 60 * 60,
+        }),
+      );
+      expect(result.stream).toBeUndefined();
+      expect(storageFactory.getOssStrategy().createSignedDownloadUrl).toHaveBeenCalledWith(
+        'public/manual.pdf',
+        30 * 24 * 60 * 60,
+        expect.objectContaining({
+          contentDisposition: "inline; filename*=UTF-8''manual.pdf",
+          cacheControl: `public, max-age=${30 * 24 * 60 * 60}`,
+        }),
+      );
+      expect(
+        storageFactory.getOssStrategy().createSignedDownloadUrl.mock.calls.at(-1)?.[2],
+      ).not.toHaveProperty('process');
+    });
+
     it('streams public local images as originals without OSS processing', async () => {
       const stream = { pipe: jest.fn() } as any;
       const storage = storageFactory.getStrategy(FileStorageType.LOCAL);
@@ -625,6 +661,63 @@ describe('FileService', () => {
       expect(result.redirectUrl).toBeUndefined();
       expect(result.cacheMaxAgeSeconds).toBeUndefined();
       expect(storage.getStream).toHaveBeenCalledWith('uploads/local.jpg');
+      expect(storageFactory.getOssStrategy().createSignedDownloadUrl).not.toHaveBeenCalled();
+    });
+  });
+
+  describe('getDownloadResult', () => {
+    it('returns a signed redirect for authorized OSS downloads', async () => {
+      const file = {
+        id: 31,
+        originalName: 'secret.pdf',
+        path: 'private/secret.pdf',
+        mimeType: 'application/pdf',
+        storage: FileStorageType.OSS,
+        isPublic: false,
+      } as FileEntity;
+      repository.findOne.mockResolvedValue(file);
+
+      const result = await service.getDownloadResult(31, 'attachment');
+
+      expect(result).toEqual(
+        expect.objectContaining({
+          file,
+          disposition: 'attachment',
+          redirectUrl: 'https://oss.example.com/download-signature',
+        }),
+      );
+      expect(result.stream).toBeUndefined();
+      expect(storageFactory.getOssStrategy().createSignedDownloadUrl).toHaveBeenCalledWith(
+        'private/secret.pdf',
+        300,
+        expect.objectContaining({
+          contentDisposition: "attachment; filename*=UTF-8''secret.pdf",
+        }),
+      );
+    });
+
+    it('keeps local downloads streaming through the backend', async () => {
+      const stream = { pipe: jest.fn() } as any;
+      const storage = storageFactory.getStrategy(FileStorageType.LOCAL);
+      (storage.getStream as jest.Mock).mockResolvedValueOnce(stream);
+      const file = {
+        id: 32,
+        originalName: 'local.txt',
+        path: 'uploads/local.txt',
+        mimeType: 'text/plain',
+        storage: FileStorageType.LOCAL,
+        isPublic: false,
+      } as FileEntity;
+      repository.findOne.mockResolvedValue(file);
+
+      const result = await service.getDownloadResult(32, 'inline');
+
+      expect(result).toEqual({
+        file,
+        disposition: 'inline',
+        stream,
+      });
+      expect(storage.getStream).toHaveBeenCalledWith('uploads/local.txt');
       expect(storageFactory.getOssStrategy().createSignedDownloadUrl).not.toHaveBeenCalled();
     });
   });

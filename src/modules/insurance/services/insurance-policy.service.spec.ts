@@ -57,7 +57,7 @@ describe('InsurancePolicyService', () => {
             upload: jest.fn(),
             createDirectUpload: jest.fn(),
             completeDirectUpload: jest.fn(),
-            getDownloadStream: jest.fn(),
+            getDownloadResult: jest.fn(),
             normalizePublicAccessUrl: jest.fn(async (file: FileEntity) => file),
           },
         },
@@ -443,6 +443,32 @@ describe('InsurancePolicyService', () => {
 
     await expect(service.getAttachmentDownload(88, 21)).rejects.toThrow(BusinessException);
     expect(attachmentRepository.findOne).not.toHaveBeenCalled();
-    expect(fileService.getDownloadStream).not.toHaveBeenCalled();
+    expect(fileService.getDownloadResult).not.toHaveBeenCalled();
+  });
+
+  it('returns the file service download result after confirming the attachment belongs to the policy', async () => {
+    const policy = Object.assign(new InsurancePolicyEntity(), { id: 88 });
+    const file = Object.assign(new FileEntity(), {
+      id: 21,
+      originalName: 'policy.pdf',
+      mimeType: 'application/pdf',
+    });
+    const download = {
+      file,
+      redirectUrl: 'https://cdn.example.com/policy.pdf?Signature=abc',
+      disposition: 'attachment' as const,
+    };
+    policyRepository.findOne.mockResolvedValue(policy);
+    attachmentRepository.findOne.mockResolvedValue(
+      Object.assign(new InsurancePolicyAttachmentEntity(), {
+        policyId: 88,
+        fileId: 21,
+        file,
+      }),
+    );
+    fileService.getDownloadResult.mockResolvedValue(download);
+
+    await expect(service.getAttachmentDownload(88, 21)).resolves.toBe(download);
+    expect(fileService.getDownloadResult).toHaveBeenCalledWith(21, 'attachment');
   });
 });

@@ -134,13 +134,18 @@ export class InsurancePolicyController {
     @Param('fileId', ParseIntPipe) fileId: number,
     @Res({ passthrough: true }) res: Response,
   ) {
-    const { file, stream } = await this.policyService.getAttachmentDownload(id, fileId);
-    res.setHeader('Content-Type', file.mimeType || 'application/octet-stream');
+    const result = await this.policyService.getAttachmentDownload(id, fileId);
+    if (result.redirectUrl) {
+      res.redirect(302, result.redirectUrl);
+      return;
+    }
+
+    res.setHeader('Content-Type', result.file.mimeType || 'application/octet-stream');
     res.setHeader(
       'Content-Disposition',
-      `attachment; filename*=UTF-8''${encodeURIComponent(file.originalName)}`,
+      `attachment; filename*=UTF-8''${encodeURIComponent(result.file.originalName)}`,
     );
 
-    return new StreamableFile(stream as any);
+    return new StreamableFile(result.stream as any);
   }
 }

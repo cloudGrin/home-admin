@@ -56,7 +56,7 @@ describe('TaskService', () => {
           provide: FileService,
           useValue: {
             checkDownloadPermission: jest.fn(),
-            getDownloadStream: jest.fn(),
+            getDownloadResult: jest.fn(),
             createTrustedAccessLink: jest.fn(),
             normalizePublicAccessUrl: jest.fn(async (file: FileEntity) => file),
           },
@@ -425,11 +425,15 @@ describe('TaskService', () => {
     attachmentRepository.findOne.mockResolvedValue(
       Object.assign(new TaskAttachmentEntity(), { taskId: 77, fileId: 21, file }),
     );
-    fileService.getDownloadStream.mockResolvedValue(stream);
+    fileService.getDownloadResult.mockResolvedValue({
+      file,
+      stream,
+      disposition: 'attachment',
+    });
 
     const result = await service.getAttachmentDownload(77, 21, { id: 1 } as any);
 
-    expect(result).toEqual({ file, stream });
+    expect(result).toEqual({ file, stream, disposition: 'attachment' });
     expect(taskRepository.findOne).toHaveBeenCalledWith(
       expect.objectContaining({ where: { id: 77 } }),
     );
@@ -437,6 +441,7 @@ describe('TaskService', () => {
       where: { taskId: 77, fileId: 21 },
       relations: ['file'],
     });
+    expect(fileService.getDownloadResult).toHaveBeenCalledWith(21, 'attachment');
   });
 
   it('creates signed task attachment access links after checking task access', async () => {

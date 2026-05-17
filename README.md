@@ -162,6 +162,7 @@ JWT_REFRESH_SECRET=dev-refresh-secret-key-change-this-in-production
 FILE_STORAGE=local
 FILE_UPLOAD_DIR=uploads
 FILE_BASE_URL=/api/v1/files
+FILE_OSS_BASE_URL=
 
 SWAGGER_ENABLE=true
 TRUST_PROXY=false
@@ -174,6 +175,8 @@ Production notes:
 - Keep `DB_SYNCHRONIZE` disabled. Schema changes are managed through migrations.
 - Enable `TRUST_PROXY=true` only behind a trusted reverse proxy.
 - Use `FILE_STORAGE=oss` only after OSS variables are configured.
+- Set `FILE_OSS_BASE_URL` to a CDN/custom domain only for OSS reads; direct browser uploads still use
+  `FILE_OSS_ENDPOINT`.
 
 ## Useful Commands
 

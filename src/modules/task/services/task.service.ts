@@ -9,7 +9,7 @@ import { UserEntity } from '~/modules/user/entities/user.entity';
 import { UserStatus } from '~/common/enums/user.enum';
 import { FileEntity } from '~/modules/file/entities/file.entity';
 import { CreateFileAccessLinkDto } from '~/modules/file/dto/file-access-link.dto';
-import { FileService } from '~/modules/file/services/file.service';
+import { FileDownloadResult, FileService } from '~/modules/file/services/file.service';
 import {
   CreateTaskDto,
   QueryTaskDto,
@@ -38,11 +38,6 @@ interface TaskDatePatch {
 
 interface FindTaskOptions {
   lock?: boolean;
-}
-
-interface TaskAttachmentDownload {
-  file: FileEntity;
-  stream: NodeJS.ReadableStream;
 }
 
 export interface TaskAttachmentAccessLink {
@@ -341,7 +336,7 @@ export class TaskService {
     taskId: number,
     fileId: number,
     user: CurrentUserLike,
-  ): Promise<TaskAttachmentDownload> {
+  ): Promise<FileDownloadResult> {
     await this.findByIdOrFail(taskId, user);
 
     const attachment = await this.taskAttachmentRepository.findOne({
@@ -352,10 +347,7 @@ export class TaskService {
       throw BusinessException.notFound('Task attachment', fileId);
     }
 
-    return {
-      file: attachment.file,
-      stream: await this.fileService.getDownloadStream(fileId),
-    };
+    return this.fileService.getDownloadResult(fileId, 'attachment');
   }
 
   async createAttachmentAccessLink(
@@ -488,7 +480,9 @@ export class TaskService {
     task: TaskEntity,
     repository: Repository<TaskCheckItemEntity>,
   ): Promise<void> {
-    const itemsToSave = (task.checkItems ?? []).filter((item) => item.completed || item.completedAt);
+    const itemsToSave = (task.checkItems ?? []).filter(
+      (item) => item.completed || item.completedAt,
+    );
     if (itemsToSave.length === 0) {
       return;
     }

@@ -10,6 +10,9 @@ describe('FileController', () => {
       upload: jest.fn().mockResolvedValue({ id: 1 }),
       getPublicDownload: jest.fn(),
       resolveAccessLink: jest.fn(),
+      findById: jest.fn(),
+      checkDownloadPermission: jest.fn(),
+      getDownloadResult: jest.fn(),
     };
 
     return {
@@ -181,5 +184,30 @@ describe('FileController', () => {
       "inline; filename*=UTF-8''local.jpg",
     );
     expect(res.redirect).not.toHaveBeenCalled();
+  });
+
+  it('redirects authorized downloads when the file service returns an OSS signed URL', async () => {
+    const { controller, fileService } = createController();
+    const res = createResponse();
+    const file = {
+      originalName: 'secret.pdf',
+      mimeType: 'application/pdf',
+    };
+    fileService.findById.mockResolvedValue(file);
+    fileService.getDownloadResult.mockResolvedValue({
+      file,
+      disposition: 'attachment',
+      redirectUrl: 'https://cdn.example.com/secret.pdf?Signature=abc',
+    });
+
+    await controller.download(5, { id: 1 } as any, res as any);
+
+    expect(fileService.checkDownloadPermission).toHaveBeenCalledWith(file, { id: 1 });
+    expect(fileService.getDownloadResult).toHaveBeenCalledWith(5, 'attachment');
+    expect(res.redirect).toHaveBeenCalledWith(
+      302,
+      'https://cdn.example.com/secret.pdf?Signature=abc',
+    );
+    expect(res.setHeader).not.toHaveBeenCalledWith('Content-Type', expect.any(String));
   });
 });

@@ -52,6 +52,7 @@ export class OssStorageStrategy implements FileStorageStrategy {
   private readonly logger = new Logger(OssStorageStrategy.name);
   private readonly config: OssConfig;
   private client?: OSS;
+  private downloadClient?: OSS;
 
   constructor(private readonly configService: ConfigService) {
     this.config = this.configService.get<OssConfig>('file.external.oss', {
@@ -59,14 +60,10 @@ export class OssStorageStrategy implements FileStorageStrategy {
     });
 
     if (this.isEnabled()) {
-      this.client = new OSS({
-        region: this.config.region,
-        bucket: this.config.bucket,
-        endpoint: this.config.endpoint,
-        accessKeyId: this.config.accessKeyId,
-        accessKeySecret: this.config.accessKeySecret,
-        secure: this.config.secure !== false,
-      });
+      this.client = this.createClient(this.config.endpoint);
+      if (this.config.baseUrl) {
+        this.downloadClient = this.createClient(this.config.baseUrl, true);
+      }
     }
   }
 
@@ -139,7 +136,7 @@ export class OssStorageStrategy implements FileStorageStrategy {
       cacheControl?: string;
     },
   ): string {
-    const client = this.ensureClient();
+    const client = this.ensureDownloadClient();
     return client.signatureUrl(key, {
       method: 'GET',
       expires,
@@ -188,11 +185,30 @@ export class OssStorageStrategy implements FileStorageStrategy {
     return result.stream;
   }
 
+  private createClient(endpoint?: string, cname = false): OSS {
+    return new OSS({
+      region: this.config.region,
+      bucket: this.config.bucket,
+      endpoint: endpoint?.replace(/\/$/, ''),
+      cname,
+      accessKeyId: this.config.accessKeyId,
+      accessKeySecret: this.config.accessKeySecret,
+      secure: this.config.secure !== false,
+    });
+  }
+
   private ensureClient(): OSS {
     if (!this.isEnabled() || !this.client) {
       throw new Error('OSS storage is not configured properly');
     }
     return this.client;
+  }
+
+  private ensureDownloadClient(): OSS {
+    if (!this.isEnabled()) {
+      throw new Error('OSS storage is not configured properly');
+    }
+    return this.downloadClient || this.ensureClient();
   }
 
   private buildMetadata(

@@ -87,9 +87,17 @@ export interface PublicDownloadResult {
   cacheMaxAgeSeconds?: number;
 }
 
+export interface FileDownloadResult {
+  file: FileEntity;
+  disposition: FileAccessDisposition;
+  stream?: NodeJS.ReadableStream;
+  redirectUrl?: string;
+  cacheMaxAgeSeconds?: number;
+}
+
 const FILE_SORT_FIELDS = new Set(['createdAt', 'updatedAt', 'originalName', 'filename', 'size']);
 const DEFAULT_FILE_MODULE = 'files';
-const PUBLIC_IMAGE_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
+const PUBLIC_OSS_CACHE_MAX_AGE_SECONDS = 30 * 24 * 60 * 60;
 const STORAGE_OPTION_LABELS: Record<FileStorageType, string> = {
   [FileStorageType.LOCAL]: '本地存储',
   [FileStorageType.OSS]: '阿里云 OSS',
@@ -446,14 +454,29 @@ export class FileService {
     }
   }
 
-  /**
-   * 获取文件下载流
-   */
-  async getDownloadStream(id: number): Promise<NodeJS.ReadableStream> {
-    const entity = await this.findById(id);
-    const storage = this.getStorageStrategy(entity.storage);
+  async getDownloadResult(
+    id: number,
+    disposition: FileAccessDisposition = 'attachment',
+  ): Promise<FileDownloadResult> {
+    const file = await this.findById(id);
 
-    return storage.getStream(entity.path);
+    if (file.storage === FileStorageType.OSS) {
+      const oss = this.storageFactory.getOssStrategy();
+      return {
+        file,
+        disposition,
+        redirectUrl: oss.createSignedDownloadUrl(file.path, this.signedOssDownloadTtlSeconds, {
+          contentDisposition: this.buildContentDisposition(file, disposition),
+        }),
+      };
+    }
+
+    const storage = this.getStorageStrategy(file.storage);
+    return {
+      file,
+      disposition,
+      stream: await storage.getStream(file.path),
+    };
   }
 
   async getPublicDownload(id: number): Promise<PublicDownloadResult> {
@@ -462,16 +485,17 @@ export class FileService {
       throw BusinessException.notFound('File', id);
     }
 
-    if (file.storage === FileStorageType.OSS && this.isImageFile(file)) {
+    if (file.storage === FileStorageType.OSS) {
       const oss = this.storageFactory.getOssStrategy();
+      const process = this.isImageFile(file) ? OSS_IMAGE_DEFAULT_INLINE_PROCESS : undefined;
       return {
         file,
-        redirectUrl: oss.createSignedDownloadUrl(file.path, PUBLIC_IMAGE_CACHE_MAX_AGE_SECONDS, {
+        redirectUrl: oss.createSignedDownloadUrl(file.path, PUBLIC_OSS_CACHE_MAX_AGE_SECONDS, {
           contentDisposition: this.buildContentDisposition(file, 'inline'),
-          process: OSS_IMAGE_DEFAULT_INLINE_PROCESS,
-          cacheControl: this.buildPublicCacheControl(PUBLIC_IMAGE_CACHE_MAX_AGE_SECONDS),
+          ...(process ? { process } : {}),
+          cacheControl: this.buildPublicCacheControl(PUBLIC_OSS_CACHE_MAX_AGE_SECONDS),
         }),
-        cacheMaxAgeSeconds: PUBLIC_IMAGE_CACHE_MAX_AGE_SECONDS,
+        cacheMaxAgeSeconds: PUBLIC_OSS_CACHE_MAX_AGE_SECONDS,
       };
     }
 

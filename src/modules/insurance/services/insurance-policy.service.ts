@@ -11,7 +11,7 @@ import {
   CreateDirectUploadDto,
 } from '~/modules/file/dto/direct-upload.dto';
 import { FileEntity } from '~/modules/file/entities/file.entity';
-import { FileService } from '~/modules/file/services/file.service';
+import { FileDownloadResult, FileService } from '~/modules/file/services/file.service';
 import { UserEntity } from '~/modules/user/entities/user.entity';
 import {
   CreateInsurancePolicyDto,
@@ -28,11 +28,6 @@ import {
 
 interface CurrentUserLike {
   id: number;
-}
-
-interface AttachmentDownloadResult {
-  file: FileEntity;
-  stream: NodeJS.ReadableStream;
 }
 
 export interface InsuranceFamilyViewItem {
@@ -258,7 +253,7 @@ export class InsurancePolicyService {
     }
   }
 
-  async getAttachmentDownload(policyId: number, fileId: number): Promise<AttachmentDownloadResult> {
+  async getAttachmentDownload(policyId: number, fileId: number): Promise<FileDownloadResult> {
     await this.findByIdOrFail(policyId);
 
     const attachment = await this.attachmentRepository.findOne({
@@ -269,10 +264,7 @@ export class InsurancePolicyService {
       throw BusinessException.notFound('Insurance policy attachment', fileId);
     }
 
-    return {
-      file: attachment.file,
-      stream: await this.fileService.getDownloadStream(fileId),
-    };
+    return this.fileService.getDownloadResult(fileId, 'attachment');
   }
 
   private async findByIdOrFail(id: number): Promise<InsurancePolicyEntity> {
