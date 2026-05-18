@@ -115,7 +115,7 @@ export class TaskService {
     };
 
     this.syncReminderSchedule(entityData as TaskEntity, { reminderChanged: true });
-    this.ensureTaskRules(entityData as TaskEntity);
+    this.ensureTaskRules(entityData as TaskEntity, { requireDueAt: true });
     const entity = this.taskRepository.create(entityData);
     const saved = await this.taskRepository.save(entity);
     if (dto.attachmentFileIds !== undefined) {
@@ -221,7 +221,7 @@ export class TaskService {
     const nextEntity = Object.assign(Object.create(Object.getPrototypeOf(entity)), entity, patch);
     this.syncReminderSchedule(nextEntity, { reminderChanged });
     this.ensureArchivedTaskMigrated(entity, nextEntity);
-    this.ensureTaskRules(nextEntity);
+    this.ensureTaskRules(nextEntity, { requireDueAt: patch.dueAt !== undefined });
 
     Object.assign(entity, patch, {
       nextReminderAt: nextEntity.nextReminderAt,
@@ -734,9 +734,13 @@ export class TaskService {
     return text;
   }
 
-  private ensureTaskRules(task: TaskEntity): void {
+  private ensureTaskRules(task: TaskEntity, options: { requireDueAt?: boolean } = {}): void {
     const recurrenceType = task.recurrenceType ?? TaskRecurrenceType.NONE;
     const taskType = task.taskType ?? TaskType.TASK;
+
+    if (options.requireDueAt && !task.dueAt) {
+      throw BusinessException.validationFailed('任务必须设置截止时间');
+    }
 
     if (task.remindAt && task.dueAt && task.remindAt.getTime() > task.dueAt.getTime()) {
       throw BusinessException.validationFailed('提醒时间不能晚于截止时间');
@@ -824,10 +828,6 @@ export class TaskService {
       throw BusinessException.validationFailed('清单已归档，不能用于任务');
     }
 
-    if (this.isSuperAdmin(user)) {
-      return;
-    }
-
     if (list.scope === TaskListScope.FAMILY) {
       return;
     }
@@ -844,7 +844,7 @@ export class TaskService {
     targetList: TaskListEntity,
     user: CurrentUserLike,
   ): void {
-    if (task.listId === targetList.id || this.isSuperAdmin(user)) {
+    if (task.listId === targetList.id) {
       return;
     }
 
@@ -958,10 +958,6 @@ export class TaskService {
   }
 
   private canAccessTask(task: TaskEntity, user: CurrentUserLike): boolean {
-    if (this.isSuperAdmin(user)) {
-      return true;
-    }
-
     if (task.list?.scope === TaskListScope.FAMILY) {
       return true;
     }
@@ -970,32 +966,16 @@ export class TaskService {
       return true;
     }
 
-    return task.creatorId === user.id || task.assigneeId === user.id;
-  }
-
-  private isSuperAdmin(user: CurrentUserLike): boolean {
-    return (
-      user.isSuperAdmin === true ||
-      user.roleCode === 'super_admin' ||
-      user.roles?.includes('super_admin') === true
-    );
+    return false;
   }
 
   private applyVisibility(qb: any, user: CurrentUserLike): void {
-    const isSuperAdmin =
-      user.isSuperAdmin === true ||
-      user.roleCode === 'super_admin' ||
-      user.roles?.includes('super_admin') === true;
-
-    if (isSuperAdmin) {
-      return;
-    }
-
     qb.where(
-      '(task.creatorId = :currentUserId OR task.assigneeId = :currentUserId OR list.scope = :familyScope OR list.ownerId = :currentUserId)',
+      '(list.scope = :familyScope OR (list.scope = :personalScope AND list.ownerId = :currentUserId))',
       {
         currentUserId: user.id,
         familyScope: TaskListScope.FAMILY,
+        personalScope: TaskListScope.PERSONAL,
       },
     );
   }
@@ -1044,14 +1024,11 @@ export class TaskService {
     }
 
     if (view === TaskQueryView.TODAY) {
-      const { start, end } = this.resolveDateRange(query, true);
-      qb.andWhere(
-        '((task.dueAt BETWEEN :todayStart AND :todayEnd) OR (task.remindAt BETWEEN :todayStart AND :todayEnd))',
-        {
-          todayStart: start,
-          todayEnd: end,
-        },
-      );
+      const { end } = this.resolveDateRange(query, true);
+      qb.andWhere('task.status = :todayStatus', { todayStatus: TaskStatus.PENDING });
+      qb.andWhere('(task.dueAt <= :todayEnd OR task.remindAt <= :todayEnd)', {
+        todayEnd: end,
+      });
       return;
     }
 

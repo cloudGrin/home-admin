@@ -344,6 +344,7 @@ describe('TaskService', () => {
       {
         title: '理赔材料',
         listId: 2,
+        dueAt: '2026-05-01T10:00:00.000Z',
         attachmentFileIds: [21, 22],
         checkItems: [
           { title: ' 拍照 ', completed: true, sort: 0 },
@@ -492,6 +493,44 @@ describe('TaskService', () => {
     await expect((service as any).findTask(8, { id: 1 })).rejects.toThrow(BusinessException);
   });
 
+  it('rejects super admin reading another user personal task', async () => {
+    const task = Object.assign(new TaskEntity(), {
+      id: 8,
+      title: '私人任务',
+      creatorId: 9,
+      assigneeId: 9,
+      list: Object.assign(new TaskListEntity(), {
+        id: 4,
+        scope: TaskListScope.PERSONAL,
+        ownerId: 9,
+      }),
+    });
+
+    taskRepository.findOne.mockResolvedValue(task);
+
+    await expect((service as any).findTask(8, { id: 1, isSuperAdmin: true })).rejects.toThrow(
+      BusinessException,
+    );
+  });
+
+  it('rejects reading another user personal task even when assigned to the current user', async () => {
+    const task = Object.assign(new TaskEntity(), {
+      id: 8,
+      title: '被错误指派的私人任务',
+      creatorId: 9,
+      assigneeId: 1,
+      list: Object.assign(new TaskListEntity(), {
+        id: 4,
+        scope: TaskListScope.PERSONAL,
+        ownerId: 9,
+      }),
+    });
+
+    taskRepository.findOne.mockResolvedValue(task);
+
+    await expect((service as any).findTask(8, { id: 1 })).rejects.toThrow(BusinessException);
+  });
+
   it('normalizes public attachment file URLs when reading a task', async () => {
     const file = Object.assign(new FileEntity(), {
       id: 21,
@@ -540,6 +579,30 @@ describe('TaskService', () => {
     taskRepository.createQueryBuilder.mockReturnValue(qb as any);
 
     await service.findTasks({}, { id: 3 } as any);
+
+    expect(qb.where).toHaveBeenCalledWith(
+      expect.stringContaining('list.ownerId = :currentUserId'),
+      expect.objectContaining({
+        currentUserId: 3,
+        familyScope: TaskListScope.FAMILY,
+      }),
+    );
+  });
+
+  it('keeps super admin task list visibility isolated to the current user', async () => {
+    const qb = {
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+    };
+    taskRepository.createQueryBuilder.mockReturnValue(qb as any);
+
+    await service.findTasks({}, { id: 3, isSuperAdmin: true } as any);
 
     expect(qb.where).toHaveBeenCalledWith(
       expect.stringContaining('list.ownerId = :currentUserId'),
@@ -624,7 +687,6 @@ describe('TaskService', () => {
       {
         description: null,
         assigneeId: null,
-        dueAt: null,
         remindAt: null,
       } as any,
       { id: 1 } as any,
@@ -632,7 +694,7 @@ describe('TaskService', () => {
 
     expect(result.description).toBeNull();
     expect(result.assigneeId).toBeNull();
-    expect(result.dueAt).toBeNull();
+    expect(result.dueAt?.toISOString()).toBe('2026-05-01T10:00:00.000Z');
     expect(result.remindAt).toBeNull();
     expect(userRepository.findOne).not.toHaveBeenCalled();
   });
@@ -642,6 +704,7 @@ describe('TaskService', () => {
       id: 24,
       title: '检查项全完成不自动完成主任务',
       status: TaskStatus.PENDING,
+      dueAt: new Date('2026-05-01T10:00:00.000Z'),
       recurrenceType: TaskRecurrenceType.NONE,
       list: Object.assign(new TaskListEntity(), {
         scope: TaskListScope.FAMILY,
@@ -686,10 +749,62 @@ describe('TaskService', () => {
     );
   });
 
+  it('allows checklist-only updates on legacy tasks without due time', async () => {
+    const task = Object.assign(new TaskEntity(), {
+      id: 25,
+      title: '历史空截止时间任务',
+      status: TaskStatus.PENDING,
+      dueAt: null,
+      remindAt: null,
+      taskType: TaskType.TASK,
+      recurrenceType: TaskRecurrenceType.NONE,
+      list: Object.assign(new TaskListEntity(), {
+        scope: TaskListScope.FAMILY,
+      }),
+      checkItems: [
+        Object.assign(new TaskCheckItemEntity(), {
+          id: 401,
+          taskId: 25,
+          title: '旧检查项',
+          completed: false,
+          sort: 0,
+        }),
+      ],
+    });
+
+    taskRepository.findOne.mockResolvedValue(task);
+    taskRepository.save.mockImplementation(async (data) => data as TaskEntity);
+    checkItemRepository.create.mockImplementation((data) => data as TaskCheckItemEntity);
+    checkItemRepository.save.mockImplementation(async (data) => data as TaskCheckItemEntity[]);
+
+    const result = await service.updateTask(
+      25,
+      {
+        checkItems: [
+          {
+            id: 401,
+            title: '旧检查项',
+            completed: true,
+            sort: 0,
+          },
+        ],
+      } as any,
+      { id: 1 } as any,
+    );
+
+    expect(result.dueAt).toBeNull();
+    expect(result.checkItems?.[0]).toEqual(
+      expect.objectContaining({
+        completed: true,
+      }),
+    );
+  });
+
   it('resets reminder delivery state when reminder time changes', async () => {
     const task = Object.assign(new TaskEntity(), {
       id: 13,
       title: '改提醒时间',
+      dueAt: new Date('2026-05-02T10:00:00.000Z'),
       remindAt: new Date('2026-05-01T09:00:00.000Z'),
       remindedAt: new Date('2026-05-01T09:00:00.000Z'),
       nextReminderAt: new Date('2026-05-01T09:30:00.000Z'),
@@ -831,6 +946,7 @@ describe('TaskService', () => {
       listId: archivedList.id,
       status: TaskStatus.PENDING,
       taskType: TaskType.TASK,
+      dueAt: new Date('2026-05-01T10:00:00.000Z'),
       recurrenceType: TaskRecurrenceType.NONE,
       list: archivedList,
     });
@@ -867,6 +983,42 @@ describe('TaskService', () => {
     await service.findTasks({ taskId: 42, page: 1, limit: 10 } as any, { id: 1 } as any);
 
     expect(qb.andWhere).toHaveBeenCalledWith('task.id = :taskId', { taskId: 42 });
+  });
+
+  it('uses today as pending overdue and due-today tasks only', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-05-02T12:00:00.000Z'));
+    const qb = {
+      leftJoinAndSelect: jest.fn().mockReturnThis(),
+      where: jest.fn().mockReturnThis(),
+      andWhere: jest.fn().mockReturnThis(),
+      orderBy: jest.fn().mockReturnThis(),
+      addOrderBy: jest.fn().mockReturnThis(),
+      skip: jest.fn().mockReturnThis(),
+      take: jest.fn().mockReturnThis(),
+      getManyAndCount: jest.fn().mockResolvedValue([[], 0]),
+    };
+    taskRepository.createQueryBuilder.mockReturnValue(qb as any);
+
+    await service.findTasks({ view: TaskQueryView.TODAY, page: 1, limit: 10 } as any, {
+      id: 1,
+    } as any);
+
+    expect(qb.andWhere).toHaveBeenCalledWith('task.status = :todayStatus', {
+      todayStatus: TaskStatus.PENDING,
+    });
+    expect(qb.andWhere).toHaveBeenCalledWith(
+      expect.stringContaining('task.dueAt <= :todayEnd'),
+      expect.objectContaining({
+        todayEnd: expect.any(Date),
+      }),
+    );
+    expect(qb.andWhere.mock.calls[1][1].todayEnd.toISOString()).toBe(
+      '2026-05-02T15:59:59.999Z',
+    );
+    const todayCondition = qb.andWhere.mock.calls
+      .map((call) => call[0])
+      .find((condition) => String(condition).includes('todayEnd'));
+    expect(todayCondition).not.toContain('IS NULL');
   });
 
   it('includes recurring task occurrences that fall inside the calendar range', async () => {

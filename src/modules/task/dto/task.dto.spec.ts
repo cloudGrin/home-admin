@@ -44,6 +44,14 @@ describe('task DTOs', () => {
     await expect(transformBody(UpdateTaskListDto, { name: '   ' })).rejects.toThrow();
   });
 
+  it('requires a due time when creating tasks', async () => {
+    await expect(transformBody(CreateTaskDto, { title: '任务', listId: 1 })).rejects.toThrow();
+  });
+
+  it('rejects clearing a task due time on update', async () => {
+    await expect(transformBody(UpdateTaskDto, { dueAt: null })).rejects.toThrow();
+  });
+
   it('rejects non-positive ids in task query', async () => {
     const dto = plainToInstance(QueryTaskDto, {
       listId: 0,
@@ -95,7 +103,6 @@ describe('task DTOs', () => {
     const dto = await transformBody(UpdateTaskDto, {
       description: null,
       assigneeId: null,
-      dueAt: null,
       remindAt: null,
       tags: null,
       recurrenceInterval: null,
@@ -104,7 +111,6 @@ describe('task DTOs', () => {
     expect(dto).toEqual({
       description: null,
       assigneeId: null,
-      dueAt: null,
       remindAt: null,
       tags: null,
       recurrenceInterval: null,
@@ -131,11 +137,13 @@ describe('task DTOs', () => {
     const dto = await transformBody(CreateTaskDto, {
       title: '任务',
       listId: 1,
+      dueAt: '2026-05-01T10:00:00.000Z',
     });
 
     expect(dto).toEqual({
       title: '任务',
       listId: 1,
+      dueAt: '2026-05-01T10:00:00.000Z',
     });
   });
 
@@ -143,6 +151,7 @@ describe('task DTOs', () => {
     const dto = await transformBody(CreateTaskDto, {
       title: '带附件的任务',
       listId: 1,
+      dueAt: '2026-05-01T10:00:00.000Z',
       attachmentFileIds: [11, 12],
       checkItems: [
         { title: '准备材料', completed: true, sort: 0 },
@@ -153,6 +162,7 @@ describe('task DTOs', () => {
     expect(dto).toEqual({
       title: '带附件的任务',
       listId: 1,
+      dueAt: '2026-05-01T10:00:00.000Z',
       attachmentFileIds: [11, 12],
       checkItems: [
         { title: '准备材料', completed: true, sort: 0 },

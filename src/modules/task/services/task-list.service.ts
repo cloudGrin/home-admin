@@ -40,13 +40,8 @@ export class TaskListService {
   }
 
   async findLists(user: CurrentUserLike): Promise<TaskListEntity[]> {
-    const isSuperAdmin =
-      user.isSuperAdmin || user.roleCode === 'super_admin' || user.roles?.includes('super_admin');
-
     return this.taskListRepository.find({
-      where: isSuperAdmin
-        ? undefined
-        : [{ scope: TaskListScope.FAMILY }, { scope: TaskListScope.PERSONAL, ownerId: user.id }],
+      where: [{ scope: TaskListScope.FAMILY }, { scope: TaskListScope.PERSONAL, ownerId: user.id }],
       order: {
         sort: 'ASC',
         createdAt: 'ASC',
@@ -100,10 +95,6 @@ export class TaskListService {
   }
 
   private ensureCanManageList(list: TaskListEntity, user: CurrentUserLike): void {
-    if (this.isSuperAdmin(user)) {
-      return;
-    }
-
     if (list.scope === TaskListScope.FAMILY) {
       return;
     }
@@ -193,13 +184,5 @@ export class TaskListService {
     const saved = await this.taskListRepository.save(entity);
     this.logger.log(`Created default task list "${saved.name}" by user ${user.id}`);
     return saved;
-  }
-
-  private isSuperAdmin(user: CurrentUserLike): boolean {
-    return (
-      user.isSuperAdmin === true ||
-      user.roleCode === 'super_admin' ||
-      user.roles?.includes('super_admin') === true
-    );
   }
 }

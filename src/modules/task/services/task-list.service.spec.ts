@@ -106,14 +106,14 @@ describe('TaskListService', () => {
     expect(repository.save).not.toHaveBeenCalled();
   });
 
-  it('keeps super admin list visibility unchanged', async () => {
+  it('keeps super admin personal list visibility isolated to the current user', async () => {
     repository.find.mockResolvedValue([]);
 
     await service.findLists({ id: 1, isSuperAdmin: true });
 
     expect(repository.find).toHaveBeenCalledWith(
       expect.objectContaining({
-        where: undefined,
+        where: [{ scope: TaskListScope.FAMILY }, { scope: TaskListScope.PERSONAL, ownerId: 1 }],
       }),
     );
   });
@@ -251,6 +251,21 @@ describe('TaskListService', () => {
     await expect((service as any).updateList(9, { name: '越权' }, { id: 3 })).rejects.toThrow(
       BusinessException,
     );
+    expect(repository.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects super admin updating another user personal list', async () => {
+    repository.findOne.mockResolvedValue(
+      Object.assign(new TaskListEntity(), {
+        id: 9,
+        scope: TaskListScope.PERSONAL,
+        ownerId: 8,
+      }),
+    );
+
+    await expect(
+      (service as any).updateList(9, { name: '越权' }, { id: 3, isSuperAdmin: true }),
+    ).rejects.toThrow(BusinessException);
     expect(repository.save).not.toHaveBeenCalled();
   });
 

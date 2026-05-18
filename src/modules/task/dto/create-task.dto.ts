@@ -62,12 +62,11 @@ export class CreateTaskDto {
   @IsEnum(TaskType)
   taskType?: TaskType;
 
-  @ApiPropertyOptional({
+  @ApiProperty({
     description: '到期时间',
   })
-  @IsOptional()
   @IsDateString()
-  dueAt?: string;
+  dueAt: string;
 
   @ApiPropertyOptional({
     description: '提醒时间',

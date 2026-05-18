@@ -70,11 +70,10 @@ export class UpdateTaskDto {
 
   @ApiPropertyOptional({
     description: '到期时间',
-    nullable: true,
   })
-  @IsOptional()
+  @IsProvided()
   @IsDateString()
-  dueAt?: string | null;
+  dueAt?: string;
 
   @ApiPropertyOptional({
     description: '提醒时间',
