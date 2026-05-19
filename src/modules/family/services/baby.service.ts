@@ -64,8 +64,6 @@ export class BabyService {
     private readonly mediaRepository: Repository<BabyBirthdayMediaEntity>,
     @InjectRepository(FileEntity)
     private readonly fileRepository: Repository<FileEntity>,
-    @InjectRepository(UserEntity)
-    private readonly userRepository: Repository<UserEntity>,
     private readonly fileService: FileService,
     private readonly userService: UserService,
   ) {}
@@ -127,11 +125,13 @@ export class BabyService {
 
   async saveProfile(dto: SaveBabyProfileDto): Promise<BabyProfileResponseDto> {
     const existing = await this.profileRepository.findOne({ where: {}, order: { id: 'ASC' } });
+    const avatarFileId = dto.avatarFileId ?? null;
+    await this.ensureBabyAvatarFile(avatarFileId);
     const payload = {
       nickname: this.normalizeRequiredText(dto.nickname, '宝宝昵称不能为空'),
       birthDate: dto.birthDate,
       birthTime: this.normalizeOptionalText(dto.birthTime),
-      avatarFileId: dto.avatarFileId ?? null,
+      avatarFileId,
       birthHeightCm: this.normalizeOptionalNumber(dto.birthHeightCm),
       birthWeightKg: this.normalizeOptionalNumber(dto.birthWeightKg),
     };
@@ -182,7 +182,10 @@ export class BabyService {
   }
 
   async deleteGrowthRecord(id: number): Promise<void> {
-    await this.growthRepository.softDelete(id);
+    const result = await this.growthRepository.softDelete(id);
+    if (!result.affected) {
+      throw BusinessException.notFound('Baby growth record', id);
+    }
   }
 
   async createBirthday(dto: CreateBabyBirthdayDto): Promise<BabyBirthdayResponseDto> {
@@ -190,13 +193,15 @@ export class BabyService {
     if (existing) {
       throw BusinessException.duplicate('Baby birthday', 'year');
     }
+    const coverFileId = dto.coverFileId ?? null;
+    await this.ensureBabyBirthdayCoverFile(coverFileId);
 
     const saved = await this.birthdayRepository.save(
       this.birthdayRepository.create({
         year: dto.year,
         title: this.normalizeRequiredText(dto.title, '生日标题不能为空'),
         description: this.normalizeOptionalText(dto.description),
-        coverFileId: dto.coverFileId ?? null,
+        coverFileId,
       }),
     );
 
@@ -213,6 +218,10 @@ export class BabyService {
       if (existing) {
         throw BusinessException.duplicate('Baby birthday', 'year');
       }
+    }
+
+    if (dto.coverFileId !== undefined) {
+      await this.ensureBabyBirthdayCoverFile(dto.coverFileId ?? null);
     }
 
     Object.assign(birthday, {
@@ -232,7 +241,10 @@ export class BabyService {
   }
 
   async deleteBirthday(id: number): Promise<void> {
-    await this.birthdayRepository.softDelete(id);
+    const result = await this.birthdayRepository.softDelete(id);
+    if (!result.affected) {
+      throw BusinessException.notFound('Baby birthday', id);
+    }
   }
 
   async uploadAvatarImage(file: Express.Multer.File, user: AuthenticatedUser): Promise<FileEntity> {
@@ -352,7 +364,7 @@ export class BabyService {
     const files = await this.fileRepository.find({ where: { id: In(fileIds) } });
     const fileMap = new Map(files.map((file) => [file.id, file]));
     const orderedFiles = fileIds.map((id) => fileMap.get(id));
-    const missingId = fileIds.find((id, index) => !orderedFiles[index]);
+    const missingId = fileIds.find((_id, index) => !orderedFiles[index]);
     if (missingId) {
       throw BusinessException.notFound('File', missingId);
     }
@@ -373,6 +385,40 @@ export class BabyService {
     return orderedFiles as FileEntity[];
   }
 
+  private async ensureBabyAvatarFile(fileId?: number | null): Promise<void> {
+    await this.ensureBabyImageFile(fileId, BABY_AVATAR_FILE_MODULE, {
+      moduleMismatch: '宝宝头像使用场景不匹配',
+      notImage: '宝宝头像仅支持图片',
+    });
+  }
+
+  private async ensureBabyBirthdayCoverFile(fileId?: number | null): Promise<void> {
+    await this.ensureBabyImageFile(fileId, BABY_BIRTHDAY_FILE_MODULE, {
+      moduleMismatch: '生日封面使用场景不匹配',
+      notImage: '生日封面仅支持图片',
+    });
+  }
+
+  private async ensureBabyImageFile(
+    fileId: number | null | undefined,
+    module: string,
+    messages: { moduleMismatch: string; notImage: string },
+  ): Promise<void> {
+    if (fileId == null) {
+      return;
+    }
+
+    const file = await this.fileRepository.findOne({ where: { id: fileId } });
+    if (!file) {
+      throw BusinessException.notFound('File', fileId);
+    }
+    if (file.module !== module) {
+      throw BusinessException.validationFailed(messages.moduleMismatch);
+    }
+
+    this.ensureImageFile(file, messages.notImage);
+  }
+
   private ensureHeightOrWeight(height?: number | string | null, weight?: number | string | null) {
     if (height === null && weight === null) {
       throw BusinessException.validationFailed('身高或体重至少填写一项');
@@ -382,7 +428,10 @@ export class BabyService {
     }
   }
 
-  private ensureImageFile(file: Pick<FileEntity, 'category' | 'mimeType' | 'originalName'>): void {
+  private ensureImageFile(
+    file: Pick<FileEntity, 'category' | 'mimeType' | 'originalName'>,
+    message = '生日合辑仅支持图片',
+  ): void {
     const mimeType = file.mimeType || '';
     if (file.category === 'image' || mimeType.startsWith('image/')) {
       return;
@@ -390,7 +439,7 @@ export class BabyService {
     if (file.originalName && FileUtil.isImage(file.originalName)) {
       return;
     }
-    throw BusinessException.validationFailed('生日合辑仅支持图片');
+    throw BusinessException.validationFailed(message);
   }
 
   private ensureImageMetadata(originalName: string, mimeType: string): void {

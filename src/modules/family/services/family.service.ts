@@ -674,7 +674,7 @@ export class FamilyService {
     const files = await this.fileRepository.find({ where: { id: In(fileIds) } });
     const fileMap = new Map(files.map((file) => [file.id, file]));
     const orderedFiles = fileIds.map((id) => fileMap.get(id));
-    const missingId = fileIds.find((id, index) => !orderedFiles[index]);
+    const missingId = fileIds.find((_id, index) => !orderedFiles[index]);
     if (missingId) {
       throw BusinessException.notFound('File', missingId);
     }

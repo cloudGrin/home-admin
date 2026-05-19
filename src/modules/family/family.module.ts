@@ -67,7 +67,13 @@ import { FamilyService } from './services/family.service';
     FamilyMediaController,
     FamilyStateController,
   ],
-  providers: [FamilyService, BabyService, FamilyReadStateService, FamilyGateway, FamilyEventService],
+  providers: [
+    FamilyService,
+    BabyService,
+    FamilyReadStateService,
+    FamilyGateway,
+    FamilyEventService,
+  ],
   exports: [FamilyService, BabyService, FamilyReadStateService],
 })
 export class FamilyModule {}

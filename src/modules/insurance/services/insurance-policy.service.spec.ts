@@ -135,7 +135,9 @@ describe('InsurancePolicyService', () => {
       Object.assign(new InsuranceMemberEntity(), { id: 3 }),
     );
     userRepository.findOne.mockResolvedValue(Object.assign(new UserEntity(), { id: 7 }));
-    fileRepository.find.mockResolvedValue([Object.assign(new FileEntity(), { id: 21 })]);
+    fileRepository.find.mockResolvedValue([
+      Object.assign(new FileEntity(), { id: 21, module: 'insurance-policy' }),
+    ]);
 
     const policy = await service.createPolicy(
       {
@@ -298,6 +300,51 @@ describe('InsurancePolicyService', () => {
         { id: 1 } as any,
       ),
     ).rejects.toThrow(BusinessException);
+    expect(policyRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects attachment file ids outside the insurance policy module before saving a policy', async () => {
+    memberRepository.findOne.mockResolvedValue(
+      Object.assign(new InsuranceMemberEntity(), { id: 3 }),
+    );
+    userRepository.findOne.mockResolvedValue(Object.assign(new UserEntity(), { id: 7 }));
+    fileRepository.find.mockResolvedValue([
+      Object.assign(new FileEntity(), { id: 21, module: 'baby-birthday' }),
+    ]);
+
+    await expect(
+      service.createPolicy(
+        {
+          name: '家庭百万医疗',
+          memberId: 3,
+          type: InsurancePolicyType.MEDICAL,
+          ownerUserId: 7,
+          attachmentFileIds: [21],
+        },
+        { id: 1 } as any,
+      ),
+    ).rejects.toThrow(BusinessException);
+    expect(policyRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects attachment file ids outside the insurance policy module when updating a policy', async () => {
+    policyRepository.findOne.mockResolvedValue(
+      Object.assign(new InsurancePolicyEntity(), {
+        id: 88,
+        name: '家庭百万医疗',
+        memberId: 3,
+        type: InsurancePolicyType.MEDICAL,
+        ownerUserId: 7,
+        reminders: [],
+      }),
+    );
+    fileRepository.find.mockResolvedValue([
+      Object.assign(new FileEntity(), { id: 22, module: 'baby-avatar' }),
+    ]);
+
+    await expect(service.updatePolicy(88, { attachmentFileIds: [22] })).rejects.toThrow(
+      BusinessException,
+    );
     expect(policyRepository.save).not.toHaveBeenCalled();
   });
 
@@ -470,5 +517,19 @@ describe('InsurancePolicyService', () => {
 
     await expect(service.getAttachmentDownload(88, 21)).resolves.toBe(download);
     expect(fileService.getDownloadResult).toHaveBeenCalledWith(21, 'attachment');
+  });
+
+  it('removes pending reminders when deleting a policy', async () => {
+    policyRepository.findOne.mockResolvedValue(
+      Object.assign(new InsurancePolicyEntity(), { id: 88 }),
+    );
+    policyRepository.softDelete.mockResolvedValue({ affected: 1 } as any);
+
+    await service.removePolicy(88);
+
+    expect(reminderRepository.delete).toHaveBeenCalledWith({
+      policyId: 88,
+      sentAt: expect.any(Object),
+    });
   });
 });

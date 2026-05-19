@@ -1051,9 +1051,12 @@ describe('TaskService', () => {
     };
     taskRepository.createQueryBuilder.mockReturnValue(qb as any);
 
-    await service.findTasks({ view: TaskQueryView.TODAY, page: 1, limit: 10 } as any, {
-      id: 1,
-    } as any);
+    await service.findTasks(
+      { view: TaskQueryView.TODAY, page: 1, limit: 10 } as any,
+      {
+        id: 1,
+      } as any,
+    );
 
     expect(qb.andWhere).toHaveBeenCalledWith('task.status = :todayStatus', {
       todayStatus: TaskStatus.PENDING,
@@ -1064,9 +1067,7 @@ describe('TaskService', () => {
         todayEnd: expect.any(Date),
       }),
     );
-    expect(qb.andWhere.mock.calls[1][1].todayEnd.toISOString()).toBe(
-      '2026-05-02T15:59:59.999Z',
-    );
+    expect(qb.andWhere.mock.calls[1][1].todayEnd.toISOString()).toBe('2026-05-02T15:59:59.999Z');
     const todayCondition = qb.andWhere.mock.calls
       .map((call) => call[0])
       .find((condition) => String(condition).includes('todayEnd'));

@@ -314,6 +314,84 @@ describe('BabyService', () => {
     );
   });
 
+  it('rejects baby avatar file ids outside the baby avatar module', async () => {
+    profileRepository.findOne.mockResolvedValue(null);
+    fileRepository.findOne.mockResolvedValue(
+      Object.assign(new FileEntity(), {
+        id: 70,
+        module: 'insurance-policy',
+        category: 'image',
+        mimeType: 'image/jpeg',
+      }),
+    );
+
+    await expect(
+      service.saveProfile({
+        nickname: '小葡萄',
+        birthDate: '2026-02-01',
+        avatarFileId: 70,
+      }),
+    ).rejects.toThrow(BusinessException);
+    expect(profileRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects birthday cover file ids outside the baby birthday module when creating albums', async () => {
+    birthdayRepository.findOne.mockResolvedValue(null);
+    fileRepository.findOne.mockResolvedValue(
+      Object.assign(new FileEntity(), {
+        id: 72,
+        module: 'insurance-policy',
+        category: 'image',
+        mimeType: 'image/jpeg',
+      }),
+    );
+
+    await expect(
+      service.createBirthday({
+        year: 2027,
+        title: '一周岁生日',
+        coverFileId: 72,
+      }),
+    ).rejects.toThrow(BusinessException);
+    expect(birthdayRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects non-image birthday cover file ids when updating albums', async () => {
+    birthdayRepository.findOne.mockResolvedValue(
+      Object.assign(new BabyBirthdayEntity(), {
+        id: 21,
+        year: 2027,
+        title: '一周岁生日',
+      }),
+    );
+    fileRepository.findOne.mockResolvedValue(
+      Object.assign(new FileEntity(), {
+        id: 73,
+        module: 'baby-birthday',
+        category: 'document',
+        mimeType: 'application/pdf',
+        originalName: 'policy.pdf',
+      }),
+    );
+
+    await expect(service.updateBirthday(21, { coverFileId: 73 })).rejects.toThrow(
+      BusinessException,
+    );
+    expect(birthdayRepository.save).not.toHaveBeenCalled();
+  });
+
+  it('rejects deleting an unknown growth record id', async () => {
+    growthRepository.softDelete.mockResolvedValue({ affected: 0 } as any);
+
+    await expect(service.deleteGrowthRecord(404)).rejects.toThrow(BusinessException);
+  });
+
+  it('rejects deleting an unknown birthday id', async () => {
+    birthdayRepository.softDelete.mockResolvedValue({ affected: 0 } as any);
+
+    await expect(service.deleteBirthday(404)).rejects.toThrow(BusinessException);
+  });
+
   it('uses trusted avatar links for birthday contribution authors', async () => {
     profileRepository.findOne.mockResolvedValue(null);
     growthRepository.find.mockResolvedValue([]);

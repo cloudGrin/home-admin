@@ -74,8 +74,6 @@ export class TaskService {
     private readonly taskRepository: Repository<TaskEntity>,
     @InjectRepository(TaskListEntity)
     private readonly taskListRepository: Repository<TaskListEntity>,
-    @InjectRepository(TaskCompletionEntity)
-    private readonly taskCompletionRepository: Repository<TaskCompletionEntity>,
     @InjectRepository(TaskAttachmentEntity)
     private readonly taskAttachmentRepository: Repository<TaskAttachmentEntity>,
     @InjectRepository(TaskCheckItemEntity)
@@ -198,7 +196,7 @@ export class TaskService {
     if (dto.listId !== undefined) {
       targetList = await this.ensureListExists(dto.listId);
       this.ensureCanUseList(targetList, user);
-      this.ensureCanMoveTaskToList(entity, targetList, user);
+      this.ensureCanMoveTaskToList(entity, targetList);
     }
 
     const nextList = targetList ?? entity.list;
@@ -856,11 +854,7 @@ export class TaskService {
     }
   }
 
-  private ensureCanMoveTaskToList(
-    task: TaskEntity,
-    targetList: TaskListEntity,
-    user: CurrentUserLike,
-  ): void {
+  private ensureCanMoveTaskToList(task: TaskEntity, targetList: TaskListEntity): void {
     if (task.listId === targetList.id) {
       return;
     }

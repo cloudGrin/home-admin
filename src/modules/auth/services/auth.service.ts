@@ -614,17 +614,14 @@ export class AuthService {
 
     try {
       const response = await firstValueFrom(
-        this.httpService.get<WeappSessionResponse>(
-          'https://api.weixin.qq.com/sns/jscode2session',
-          {
-            params: {
-              appid: appId,
-              secret: appSecret,
-              js_code: code,
-              grant_type: 'authorization_code',
-            },
+        this.httpService.get<WeappSessionResponse>('https://api.weixin.qq.com/sns/jscode2session', {
+          params: {
+            appid: appId,
+            secret: appSecret,
+            js_code: code,
+            grant_type: 'authorization_code',
           },
-        ),
+        }),
       );
       const data = response.data;
 
@@ -646,7 +643,7 @@ export class AuthService {
     await this.userRepository.increment({ id: userId }, 'tokenVersion', 1);
   }
 
-  private emitLoginFailure(account: string, ip?: string, userAgent?: string, reason?: string) {
+  private emitLoginFailure(account: string, _ip?: string, _userAgent?: string, reason?: string) {
     this.logger.warn(`Login failed for ${account}: ${reason || 'unknown reason'}`);
   }
 

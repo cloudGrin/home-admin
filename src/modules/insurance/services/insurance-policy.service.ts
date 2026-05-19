@@ -102,7 +102,7 @@ export class InsurancePolicyService {
     await this.ensureMemberExists(dto.memberId);
     const ownerUserId = dto.ownerUserId ?? user.id;
     await this.ensureUserExists(ownerUserId);
-    await this.ensureAttachmentFilesExist(dto.attachmentFileIds);
+    await this.ensureAttachmentFilesUsable(dto.attachmentFileIds);
 
     const entity = this.policyRepository.create({
       ...this.toPolicyPatch(dto),
@@ -222,7 +222,7 @@ export class InsurancePolicyService {
       entity.ownerUserId = dto.ownerUserId;
     }
     if (dto.attachmentFileIds !== undefined) {
-      await this.ensureAttachmentFilesExist(dto.attachmentFileIds);
+      await this.ensureAttachmentFilesUsable(dto.attachmentFileIds);
     }
 
     Object.assign(entity, this.toPolicyPatch(dto));
@@ -251,6 +251,7 @@ export class InsurancePolicyService {
     if (!result.affected) {
       throw BusinessException.notFound('Insurance policy', id);
     }
+    await this.reminderRepository.delete({ policyId: id, sentAt: IsNull() as any });
   }
 
   async getAttachmentDownload(policyId: number, fileId: number): Promise<FileDownloadResult> {
@@ -342,7 +343,7 @@ export class InsurancePolicyService {
     }
   }
 
-  private async ensureAttachmentFilesExist(fileIds?: number[]): Promise<void> {
+  private async ensureAttachmentFilesUsable(fileIds?: number[]): Promise<void> {
     const ids = this.uniqueIds(fileIds);
     if (ids.length === 0) {
       return;
@@ -353,6 +354,15 @@ export class InsurancePolicyService {
     const missingIds = ids.filter((id) => !existingIds.has(id));
     if (missingIds.length > 0) {
       throw BusinessException.validationFailed(`以下附件不存在：${missingIds.join(', ')}`);
+    }
+
+    const mismatchedIds = files
+      .filter((file) => file.module !== INSURANCE_ATTACHMENT_FILE_OPTIONS.module)
+      .map((file) => file.id);
+    if (mismatchedIds.length > 0) {
+      throw BusinessException.validationFailed(
+        `以下附件使用场景不匹配：${mismatchedIds.join(', ')}`,
+      );
     }
   }
 

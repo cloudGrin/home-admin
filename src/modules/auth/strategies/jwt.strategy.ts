@@ -24,7 +24,7 @@ export interface AuthenticatedUser {
 export class JwtStrategy extends PassportStrategy(Strategy) {
   constructor(
     private readonly userService: UserService,
-    private readonly configService: ConfigService,
+    configService: ConfigService,
     @InjectRepository(RefreshTokenEntity)
     private readonly refreshTokenRepository: Repository<RefreshTokenEntity>,
   ) {
