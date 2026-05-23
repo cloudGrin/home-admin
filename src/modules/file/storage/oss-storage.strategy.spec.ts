@@ -4,6 +4,7 @@ import { createMockConfigService } from '~/test-utils';
 import { OssStorageStrategy } from './oss-storage.strategy';
 
 const mockOssClient = {
+  listV2: jest.fn(),
   signatureUrlV4: jest.fn(),
   signatureUrl: jest.fn(),
 };
@@ -35,6 +36,11 @@ describe('OssStorageStrategy', () => {
     jest.clearAllMocks();
     mockOssClient.signatureUrlV4.mockResolvedValue('https://oss.example.com/upload-signature');
     mockOssClient.signatureUrl.mockReturnValue('https://oss.example.com/download-signature');
+    mockOssClient.listV2.mockResolvedValue({
+      objects: [],
+      isTruncated: false,
+      nextContinuationToken: null,
+    });
 
     (OSS as unknown as jest.Mock).mockImplementation(() => mockOssClient);
 
@@ -142,5 +148,41 @@ describe('OssStorageStrategy', () => {
         cname: true,
       }),
     );
+  });
+
+  it('lists OSS objects under a prefix for cleanup reconciliation', async () => {
+    mockOssClient.listV2.mockResolvedValue({
+      objects: [
+        {
+          name: 'family-chat/2026/05/21/photo.jpg',
+          lastModified: '2026-05-21T01:00:00.000Z',
+          size: 1024,
+        },
+      ],
+      isTruncated: true,
+      nextContinuationToken: 'next-token',
+    });
+
+    const result = await strategy.listObjects('family-chat/', {
+      continuationToken: 'current-token',
+      maxKeys: 50,
+    });
+
+    expect(mockOssClient.listV2).toHaveBeenCalledWith({
+      prefix: 'family-chat/',
+      'max-keys': 50,
+      continuationToken: 'current-token',
+    });
+    expect(result).toEqual({
+      objects: [
+        {
+          key: 'family-chat/2026/05/21/photo.jpg',
+          lastModified: new Date('2026-05-21T01:00:00.000Z'),
+          size: 1024,
+        },
+      ],
+      isTruncated: true,
+      nextContinuationToken: 'next-token',
+    });
   });
 });

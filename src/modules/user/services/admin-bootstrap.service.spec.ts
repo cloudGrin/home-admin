@@ -183,6 +183,13 @@ describe('AdminBootstrapService', () => {
           parentId: 10,
         }),
         expect.objectContaining({
+          name: '文件清理',
+          path: '/system/file-cleanup',
+          component: 'FileCleanupPage',
+          parentId: 10,
+          sort: 85,
+        }),
+        expect.objectContaining({
           name: '通知中心',
           parentId: 10,
         }),
@@ -251,6 +258,13 @@ describe('AdminBootstrapService', () => {
         parentId: null,
       }),
     );
+    expect(menuRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: '文件清理',
+        path: '/system/file-cleanup',
+        component: 'FileCleanupPage',
+      }),
+    );
   });
 
   it('已有默认菜单时只同步路由关键字段并保留用户可配置的图标', async () => {
@@ -299,6 +313,7 @@ describe('AdminBootstrapService', () => {
     permissionRepository.create.mockImplementation((data) => data as PermissionEntity);
     permissionRepository.save.mockResolvedValue([] as unknown as PermissionEntity);
     menuRepository.count.mockResolvedValue(1);
+    menuRepository.create.mockImplementation((data) => data as MenuEntity);
     menuRepository.findOne.mockImplementation(async (options: any) => {
       switch (options.where?.path) {
         case '/tasks':
@@ -334,6 +349,14 @@ describe('AdminBootstrapService', () => {
         path: '/family-content',
         component: 'FamilyContentPage',
         parentId: null,
+      }),
+    );
+    expect(menuRepository.save).toHaveBeenCalledWith(
+      expect.objectContaining({
+        name: '文件清理',
+        path: '/system/file-cleanup',
+        component: 'FileCleanupPage',
+        parentId: 10,
       }),
     );
   });

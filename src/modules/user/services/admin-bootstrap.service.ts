@@ -166,6 +166,7 @@ export class AdminBootstrapService implements OnApplicationBootstrap {
       await this.ensureDefaultMenu(this.createBabyProfileMenu());
       const systemMenu = await this.ensureSystemMenu();
       await this.ensureDefaultMenu(this.createAutomationMenu(systemMenu.id));
+      await this.ensureDefaultMenu(this.createFileCleanupMenu(systemMenu.id));
       return;
     }
 
@@ -244,6 +245,9 @@ export class AdminBootstrapService implements OnApplicationBootstrap {
         sort: 80,
         isVisible: true,
         isActive: true,
+      },
+      {
+        ...this.createFileCleanupMenu(savedSystemMenu.id),
       },
       {
         name: '通知中心',
@@ -378,6 +382,20 @@ export class AdminBootstrapService implements OnApplicationBootstrap {
       component: 'system/automation',
       parentId,
       sort: 70,
+      isVisible: true,
+      isActive: true,
+    };
+  }
+
+  private createFileCleanupMenu(parentId: number): DefaultMenuDefinition {
+    return {
+      name: '文件清理',
+      path: '/system/file-cleanup',
+      type: MenuType.MENU,
+      icon: 'delete',
+      component: 'FileCleanupPage',
+      parentId,
+      sort: 85,
       isVisible: true,
       isActive: true,
     };

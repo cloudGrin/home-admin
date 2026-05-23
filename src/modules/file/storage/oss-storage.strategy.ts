@@ -35,6 +35,23 @@ export interface OssSignedUploadCredentials {
   headers: Record<string, string>;
 }
 
+export interface ListedOssObject {
+  key: string;
+  size?: number;
+  lastModified?: Date;
+}
+
+export interface ListOssObjectsResult {
+  objects: ListedOssObject[];
+  nextContinuationToken?: string | null;
+  isTruncated: boolean;
+}
+
+export interface ListOssObjectsOptions {
+  continuationToken?: string;
+  maxKeys?: number;
+}
+
 type OssClientWithSignedUrlV4 = OSS & {
   signatureUrlV4: (
     method: string,
@@ -164,6 +181,38 @@ export class OssStorageStrategy implements FileStorageStrategy {
       contentLength: Number.isFinite(contentLength) ? contentLength : 0,
       contentType: headers['content-type'],
       etag: headers.etag,
+    };
+  }
+
+  async listObjects(
+    prefix: string,
+    options: ListOssObjectsOptions = {},
+  ): Promise<ListOssObjectsResult> {
+    const client = this.ensureClient() as OSS & {
+      listV2: (query: Record<string, unknown>) => Promise<{
+        objects?: Array<{
+          name: string;
+          lastModified?: string | Date;
+          size?: number;
+        }>;
+        isTruncated?: boolean;
+        nextContinuationToken?: string | null;
+      }>;
+    };
+    const result = await client.listV2({
+      prefix,
+      'max-keys': options.maxKeys ?? 1000,
+      ...(options.continuationToken ? { continuationToken: options.continuationToken } : {}),
+    });
+
+    return {
+      objects: (result.objects ?? []).map((object) => ({
+        key: object.name,
+        lastModified: object.lastModified ? new Date(object.lastModified) : undefined,
+        size: object.size,
+      })),
+      isTruncated: Boolean(result.isTruncated),
+      nextContinuationToken: result.nextContinuationToken ?? null,
     };
   }
 

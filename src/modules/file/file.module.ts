@@ -5,8 +5,11 @@ import { TypeOrmModule } from '@nestjs/typeorm';
 import { memoryStorage } from 'multer';
 import { DEFAULT_FILE_MAX_SIZE } from '~/config/constants';
 import { FileEntity } from './entities/file.entity';
+import { FileCleanupCandidateEntity } from './entities/file-cleanup-candidate.entity';
 import { FileService } from './services/file.service';
 import { FileController } from './controllers/file.controller';
+import { FileCleanupController } from './controllers/file-cleanup.controller';
+import { FileCleanupService } from './services/file-cleanup.service';
 import { LocalStorageStrategy } from './storage/local-storage.strategy';
 import { OssStorageStrategy } from './storage/oss-storage.strategy';
 import { FileStorageFactory } from './storage/storage.factory';
@@ -26,14 +29,20 @@ export function buildFileUploadMulterOptions(configService: ConfigService): Mult
 
 @Module({
   imports: [
-    TypeOrmModule.forFeature([FileEntity]),
+    TypeOrmModule.forFeature([FileEntity, FileCleanupCandidateEntity]),
     MulterModule.registerAsync({
       inject: [ConfigService],
       useFactory: buildFileUploadMulterOptions,
     }),
   ],
-  controllers: [FileController],
-  providers: [FileService, LocalStorageStrategy, OssStorageStrategy, FileStorageFactory],
-  exports: [FileService],
+  controllers: [FileController, FileCleanupController],
+  providers: [
+    FileService,
+    FileCleanupService,
+    LocalStorageStrategy,
+    OssStorageStrategy,
+    FileStorageFactory,
+  ],
+  exports: [FileService, FileCleanupService],
 })
 export class FileModule {}

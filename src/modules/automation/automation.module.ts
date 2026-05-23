@@ -2,6 +2,7 @@ import { Module } from '@nestjs/common';
 import { ScheduleModule } from '@nestjs/schedule';
 import { TypeOrmModule } from '@nestjs/typeorm';
 import { AuthModule } from '~/modules/auth/auth.module';
+import { FileModule } from '~/modules/file/file.module';
 import { InsuranceModule } from '~/modules/insurance/insurance.module';
 import { TaskModule } from '~/modules/task/task.module';
 import { AutomationTaskController } from './controllers/automation-task.controller';
@@ -19,6 +20,7 @@ import { AutomationTaskService } from './services/automation-task.service';
     AuthModule,
     TaskModule,
     InsuranceModule,
+    FileModule,
   ],
   controllers: [AutomationTaskController],
   providers: [
