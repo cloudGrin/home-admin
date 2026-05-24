@@ -1,5 +1,15 @@
-import { Body, Controller, Get, HttpCode, HttpStatus, Post, Query } from '@nestjs/common';
-import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiTags } from '@nestjs/swagger';
+import {
+  Body,
+  Controller,
+  Get,
+  HttpCode,
+  HttpStatus,
+  Param,
+  ParseIntPipe,
+  Post,
+  Query,
+} from '@nestjs/common';
+import { ApiBearerAuth, ApiOkResponse, ApiOperation, ApiParam, ApiTags } from '@nestjs/swagger';
 import { CurrentUser, RequirePermissions } from '~/core/decorators';
 import { AuthenticatedUser } from '~/modules/auth/strategies/jwt.strategy';
 import {
@@ -30,6 +40,18 @@ export class FileCleanupController {
   @ApiOperation({ summary: '扫描文件清理候选，不执行删除' })
   async scanCandidates(@Body() dto: ScanFileCleanupCandidatesDto) {
     return this.cleanupService.scanCandidates(dto);
+  }
+
+  @Post(':id/access-link')
+  @HttpCode(HttpStatus.OK)
+  @RequirePermissions('file:delete')
+  @ApiOperation({ summary: '创建文件清理候选预览链接' })
+  @ApiParam({ name: 'id', description: '文件清理候选ID' })
+  async createAccessLink(
+    @Param('id', ParseIntPipe) id: number,
+    @CurrentUser() user: AuthenticatedUser,
+  ) {
+    return this.cleanupService.createAccessLink(id, user);
   }
 
   @Post('delete')

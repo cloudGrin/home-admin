@@ -1,6 +1,8 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
+import { posix } from 'path';
 import { DataSource, In, Repository } from 'typeorm';
+import { BusinessException } from '~/common/exceptions/business.exception';
 import { PaginationResult } from '~/common/types/pagination.types';
 import { LoggerService } from '~/shared/logger/logger.service';
 import { FileEntity, FileStorageType } from '../entities/file.entity';
@@ -38,6 +40,7 @@ const DEFAULT_OSS_OBJECT_OLDER_THAN_HOURS = 24;
 const DEFAULT_SCAN_LIMIT = 100;
 const MAX_SCAN_LIMIT = 500;
 const OSS_LIST_PAGE_SIZE = 1000;
+const PREVIEW_LINK_TTL_SECONDS = 300;
 const CANDIDATE_SORT_FIELDS = new Set([
   'createdAt',
   'updatedAt',
@@ -74,6 +77,18 @@ export interface FileCleanupDeleteResult {
   deleted: number;
   stale: number;
   failed: number;
+}
+
+export interface FileCleanupAccessLinkResult {
+  url: string;
+  token?: string;
+  expiresAt: string;
+  cacheMaxAgeSeconds?: number;
+}
+
+interface FileCleanupAccessUser {
+  id: number;
+  roles?: Array<{ code: string } | string>;
 }
 
 interface NormalizedScanOptions {
@@ -265,6 +280,57 @@ export class FileCleanupService {
     }
 
     return result;
+  }
+
+  async createAccessLink(
+    id: number,
+    user: FileCleanupAccessUser,
+  ): Promise<FileCleanupAccessLinkResult> {
+    const candidate = await this.candidateRepository.findOne({ where: { id } });
+    if (!candidate) {
+      throw BusinessException.notFound('File cleanup candidate', id);
+    }
+
+    if (!DELETABLE_STATUSES.has(candidate.status)) {
+      throw BusinessException.validationFailed('该候选当前状态不可预览');
+    }
+
+    const safe = await this.isCandidateStillSafe(candidate);
+    if (!safe) {
+      throw BusinessException.validationFailed('该候选已不可安全预览');
+    }
+
+    if (candidate.source === FileCleanupCandidateSource.DB_ORPHAN) {
+      if (!candidate.fileId) {
+        throw BusinessException.validationFailed('该候选已不可安全预览');
+      }
+
+      const file = await this.fileRepository.findOne({ where: { id: candidate.fileId } });
+      if (!file) {
+        throw BusinessException.validationFailed('该候选已不可安全预览');
+      }
+
+      this.fileService.checkDownloadPermission(file, user);
+
+      return this.fileService.createTrustedAccessLink(file.id, {
+        disposition: 'inline',
+        cacheMaxAgeSeconds: PREVIEW_LINK_TTL_SECONDS,
+        file,
+      });
+    }
+
+    const expiresAt = new Date(Date.now() + PREVIEW_LINK_TTL_SECONDS * 1000).toISOString();
+    const url = this.storageFactory
+      .getOssStrategy()
+      .createSignedDownloadUrl(candidate.objectKey, PREVIEW_LINK_TTL_SECONDS, {
+        contentDisposition: this.buildInlineContentDisposition(candidate),
+      });
+
+    return {
+      url,
+      expiresAt,
+      cacheMaxAgeSeconds: PREVIEW_LINK_TTL_SECONDS,
+    };
   }
 
   async ignoreCandidates(
@@ -585,6 +651,11 @@ export class FileCleanupService {
 
   private getModuleFromObjectKey(objectKey: string): string | undefined {
     return objectKey.split('/')[0] || undefined;
+  }
+
+  private buildInlineContentDisposition(candidate: FileCleanupCandidateEntity): string {
+    const filename = candidate.originalName?.trim() || posix.basename(candidate.objectKey);
+    return `inline; filename*=UTF-8''${encodeURIComponent(filename)}`;
   }
 
   private isOssStorageAvailable(): boolean {

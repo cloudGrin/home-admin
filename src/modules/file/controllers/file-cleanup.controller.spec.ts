@@ -7,6 +7,7 @@ describe('FileCleanupController', () => {
     const service = {
       findCandidates: jest.fn().mockResolvedValue({ items: [], meta: {} }),
       scanCandidates: jest.fn().mockResolvedValue({ created: 1 }),
+      createAccessLink: jest.fn().mockResolvedValue({ url: '/preview', expiresAt: '2026-05-21' }),
       deleteCandidates: jest.fn().mockResolvedValue({ deleted: 1 }),
       ignoreCandidates: jest.fn().mockResolvedValue({ updated: 1 }),
     };
@@ -44,6 +45,15 @@ describe('FileCleanupController', () => {
     expect(service.deleteCandidates).toHaveBeenCalledWith([1, 2], 7);
   });
 
+  it('creates a preview access link for one cleanup candidate', async () => {
+    const { controller, service } = createController();
+    const currentUser = { id: 7, roles: ['family_member'] };
+
+    await controller.createAccessLink(3, currentUser as any);
+
+    expect(service.createAccessLink).toHaveBeenCalledWith(3, currentUser);
+  });
+
   it('uses file permissions for read and destructive actions', () => {
     expect(
       Reflect.getMetadata(PERMISSIONS_KEY, FileCleanupController.prototype.findCandidates),
@@ -51,6 +61,9 @@ describe('FileCleanupController', () => {
     expect(
       Reflect.getMetadata(PERMISSIONS_KEY, FileCleanupController.prototype.scanCandidates),
     ).toEqual(['file:read']);
+    expect(
+      Reflect.getMetadata(PERMISSIONS_KEY, FileCleanupController.prototype.createAccessLink),
+    ).toEqual(['file:delete']);
     expect(
       Reflect.getMetadata(PERMISSIONS_KEY, FileCleanupController.prototype.deleteCandidates),
     ).toEqual(['file:delete']);

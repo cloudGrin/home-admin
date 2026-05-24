@@ -1,6 +1,7 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
 import { DataSource } from 'typeorm';
+import { BusinessException } from '~/common/exceptions/business.exception';
 import { LoggerService } from '~/shared/logger/logger.service';
 import { createMockLogger, createMockRepository } from '~/test-utils';
 import { FileEntity, FileStorageType } from '../entities/file.entity';
@@ -19,13 +20,16 @@ describe('FileCleanupService', () => {
   let fileRepository: any;
   let fileQueryBuilder: any;
   let dataSource: jest.Mocked<Pick<DataSource, 'query'>>;
-  let fileService: jest.Mocked<Pick<FileService, 'remove'>>;
+  let fileService: jest.Mocked<
+    Pick<FileService, 'remove' | 'createTrustedAccessLink' | 'checkDownloadPermission'>
+  >;
   let storageFactory: {
     getAvailableStorageTypes: jest.Mock;
     getOssStrategy: jest.Mock;
   };
   let ossStrategy: {
     listObjects: jest.Mock;
+    createSignedDownloadUrl: jest.Mock;
     delete: jest.Mock;
   };
 
@@ -66,13 +70,22 @@ describe('FileCleanupService', () => {
     candidateRepository = createMockRepository<FileCleanupCandidateEntity>();
     fileRepository = createMockRepository<FileEntity>();
     dataSource = { query: jest.fn() };
-    fileService = { remove: jest.fn().mockResolvedValue(undefined) };
+    fileService = {
+      remove: jest.fn().mockResolvedValue(undefined),
+      checkDownloadPermission: jest.fn(),
+      createTrustedAccessLink: jest.fn().mockResolvedValue({
+        url: '/api/v1/files/21/access?token=preview',
+        token: 'preview',
+        expiresAt: '2026-05-21T00:05:00.000Z',
+      }),
+    };
     ossStrategy = {
       listObjects: jest.fn().mockResolvedValue({
         objects: [],
         isTruncated: false,
         nextContinuationToken: null,
       }),
+      createSignedDownloadUrl: jest.fn().mockReturnValue('https://oss.example.com/preview'),
       delete: jest.fn().mockResolvedValue(undefined),
     };
     storageFactory = {
@@ -429,6 +442,140 @@ describe('FileCleanupService', () => {
 
     expect(result.stale).toBe(0);
     expect(candidateRepository.find).not.toHaveBeenCalled();
+  });
+
+  it('creates an inline preview link for pending DB orphan candidates after safety check', async () => {
+    candidateRepository.findOne.mockResolvedValue(createCandidate());
+    fileRepository.findOne.mockResolvedValue(createFile());
+    dataSource.query.mockResolvedValue([]);
+
+    const currentUser = { id: 7, roles: ['family_member'] };
+
+    const result = await service.createAccessLink(1, currentUser);
+
+    expect(result).toEqual(
+      expect.objectContaining({
+        url: '/api/v1/files/21/access?token=preview',
+        expiresAt: '2026-05-21T00:05:00.000Z',
+      }),
+    );
+    expect(fileService.checkDownloadPermission).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 21 }),
+      currentUser,
+    );
+    expect(fileService.createTrustedAccessLink).toHaveBeenCalledWith(21, {
+      disposition: 'inline',
+      cacheMaxAgeSeconds: 300,
+      file: expect.objectContaining({ id: 21 }),
+    });
+  });
+
+  it('rejects DB orphan preview links when the user cannot download the file', async () => {
+    const currentUser = { id: 8, roles: ['family_member'] };
+    candidateRepository.findOne.mockResolvedValue(createCandidate());
+    fileRepository.findOne.mockResolvedValue(createFile({ uploaderId: 7 }));
+    dataSource.query.mockResolvedValue([]);
+    fileService.checkDownloadPermission.mockImplementation(() => {
+      throw BusinessException.forbidden('无权下载此文件');
+    });
+
+    await expect(service.createAccessLink(1, currentUser)).rejects.toThrow('无权下载此文件');
+
+    expect(fileService.checkDownloadPermission).toHaveBeenCalledWith(
+      expect.objectContaining({ id: 21, uploaderId: 7 }),
+      currentUser,
+    );
+    expect(fileService.createTrustedAccessLink).not.toHaveBeenCalled();
+  });
+
+  it('creates a signed inline preview link for pending untracked OSS candidates', async () => {
+    candidateRepository.findOne.mockResolvedValue(
+      createCandidate({
+        identity: 'oss:files/2026/05/20/draft.jpg',
+        source: FileCleanupCandidateSource.OSS_UNTRACKED,
+        fileId: null,
+        module: 'files',
+        objectKey: 'files/2026/05/20/draft.jpg',
+      }),
+    );
+    fileRepository.findOne.mockResolvedValue(null);
+    ossStrategy.listObjects.mockResolvedValue({
+      objects: [
+        {
+          key: 'files/2026/05/20/draft.jpg',
+          lastModified: new Date('2026-05-20T00:00:00.000Z'),
+          size: 2048,
+        },
+      ],
+      isTruncated: false,
+      nextContinuationToken: null,
+    });
+
+    const result = await service.createAccessLink(1, { id: 7, roles: ['family_member'] });
+
+    expect(result.url).toBe('https://oss.example.com/preview');
+    expect(result.expiresAt).toEqual(expect.any(String));
+    expect(ossStrategy.createSignedDownloadUrl).toHaveBeenCalledWith(
+      'files/2026/05/20/draft.jpg',
+      300,
+      expect.objectContaining({
+        contentDisposition: "inline; filename*=UTF-8''draft.jpg",
+      }),
+    );
+    expect(fileService.createTrustedAccessLink).not.toHaveBeenCalled();
+  });
+
+  it('rejects preview links for non-open cleanup candidates', async () => {
+    candidateRepository.findOne.mockResolvedValue(
+      createCandidate({ status: FileCleanupCandidateStatus.IGNORED }),
+    );
+
+    await expect(service.createAccessLink(1, { id: 7, roles: [] })).rejects.toThrow(
+      '该候选当前状态不可预览',
+    );
+
+    expect(fileService.createTrustedAccessLink).not.toHaveBeenCalled();
+    expect(ossStrategy.createSignedDownloadUrl).not.toHaveBeenCalled();
+  });
+
+  it('rejects untracked OSS preview when the object now has an active file record', async () => {
+    candidateRepository.findOne.mockResolvedValue(
+      createCandidate({
+        identity: 'oss:files/2026/05/20/draft.jpg',
+        source: FileCleanupCandidateSource.OSS_UNTRACKED,
+        fileId: null,
+        module: 'files',
+        objectKey: 'files/2026/05/20/draft.jpg',
+      }),
+    );
+    fileRepository.findOne.mockResolvedValue(
+      createFile({ id: 31, path: 'files/2026/05/20/draft.jpg', module: 'files' }),
+    );
+
+    await expect(service.createAccessLink(1, { id: 7, roles: [] })).rejects.toThrow(
+      '该候选已不可安全预览',
+    );
+
+    expect(ossStrategy.createSignedDownloadUrl).not.toHaveBeenCalled();
+  });
+
+  it('rejects untracked OSS preview outside cleanup prefixes', async () => {
+    candidateRepository.findOne.mockResolvedValue(
+      createCandidate({
+        identity: 'oss:external/2026/05/20/object.jpg',
+        source: FileCleanupCandidateSource.OSS_UNTRACKED,
+        fileId: null,
+        module: 'external',
+        objectKey: 'external/2026/05/20/object.jpg',
+      }),
+    );
+    fileRepository.findOne.mockResolvedValue(null);
+
+    await expect(service.createAccessLink(1, { id: 7, roles: [] })).rejects.toThrow(
+      '该候选已不可安全预览',
+    );
+
+    expect(ossStrategy.createSignedDownloadUrl).not.toHaveBeenCalled();
   });
 
   it('marks candidates stale when they are no longer eligible before deletion', async () => {
