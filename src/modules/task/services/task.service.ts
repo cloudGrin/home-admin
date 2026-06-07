@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import dayjs from 'dayjs';
-import { DataSource, In, Repository, SelectQueryBuilder } from 'typeorm';
+import { DataSource, EntityManager, In, Repository, SelectQueryBuilder } from 'typeorm';
 import { BusinessException } from '~/common/exceptions/business.exception';
 import { PaginationResult } from '~/common/types/pagination.types';
 import { LoggerService } from '~/shared/logger/logger.service';
@@ -116,13 +116,20 @@ export class TaskService {
     this.syncReminderSchedule(entityData as TaskEntity, { reminderChanged: true });
     this.ensureTaskRules(entityData as TaskEntity, { requireDueAt: true });
     const entity = this.taskRepository.create(entityData);
-    const saved = await this.taskRepository.save(entity);
-    if (dto.attachmentFileIds !== undefined) {
-      saved.attachments = await this.replaceAttachments(saved.id, dto.attachmentFileIds);
-    }
-    if (dto.checkItems !== undefined) {
-      saved.checkItems = await this.replaceCheckItems(saved.id, dto.checkItems);
-    }
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const persisted = await manager.getRepository(TaskEntity).save(entity);
+      if (dto.attachmentFileIds !== undefined) {
+        persisted.attachments = await this.replaceAttachments(
+          persisted.id,
+          dto.attachmentFileIds,
+          manager,
+        );
+      }
+      if (dto.checkItems !== undefined) {
+        persisted.checkItems = await this.replaceCheckItems(persisted.id, dto.checkItems, manager);
+      }
+      return persisted;
+    });
     this.logger.log(`Created task "${saved.title}" by user ${user.id}`);
     return saved;
   }
@@ -230,13 +237,20 @@ export class TaskService {
       continuousReminderEnabled: nextEntity.continuousReminderEnabled,
       continuousReminderIntervalMinutes: nextEntity.continuousReminderIntervalMinutes,
     });
-    const saved = await this.taskRepository.save(entity);
-    if (dto.attachmentFileIds !== undefined) {
-      saved.attachments = await this.replaceAttachments(saved.id, dto.attachmentFileIds);
-    }
-    if (dto.checkItems !== undefined) {
-      saved.checkItems = await this.replaceCheckItems(saved.id, dto.checkItems);
-    }
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const persisted = await manager.getRepository(TaskEntity).save(entity);
+      if (dto.attachmentFileIds !== undefined) {
+        persisted.attachments = await this.replaceAttachments(
+          persisted.id,
+          dto.attachmentFileIds,
+          manager,
+        );
+      }
+      if (dto.checkItems !== undefined) {
+        persisted.checkItems = await this.replaceCheckItems(persisted.id, dto.checkItems, manager);
+      }
+      return persisted;
+    });
     return saved;
   }
 
@@ -417,16 +431,20 @@ export class TaskService {
   private async replaceAttachments(
     taskId: number,
     fileIds?: number[],
+    manager?: EntityManager,
   ): Promise<TaskAttachmentEntity[]> {
+    const repo = manager
+      ? manager.getRepository(TaskAttachmentEntity)
+      : this.taskAttachmentRepository;
     const ids = this.uniqueIds(fileIds);
-    await this.taskAttachmentRepository.delete({ taskId });
+    await repo.delete({ taskId });
     if (ids.length === 0) {
       return [];
     }
 
-    return this.taskAttachmentRepository.save(
+    return repo.save(
       ids.map((fileId, index) =>
-        this.taskAttachmentRepository.create({
+        repo.create({
           taskId,
           fileId,
           sort: index,
@@ -438,17 +456,21 @@ export class TaskService {
   private async replaceCheckItems(
     taskId: number,
     items?: TaskCheckItemInputDto[],
+    manager?: EntityManager,
   ): Promise<TaskCheckItemEntity[]> {
-    await this.taskCheckItemRepository.delete({ taskId });
+    const repo = manager
+      ? manager.getRepository(TaskCheckItemEntity)
+      : this.taskCheckItemRepository;
+    await repo.delete({ taskId });
     if (!items?.length) {
       return [];
     }
 
     const now = new Date();
-    return this.taskCheckItemRepository.save(
+    return repo.save(
       items.map((item, index) => {
         const completed = item.completed ?? false;
-        return this.taskCheckItemRepository.create({
+        return repo.create({
           taskId,
           title: this.normalizeCheckItemTitle(item.title),
           completed,

@@ -1,6 +1,6 @@
 import { Test, TestingModule } from '@nestjs/testing';
 import { getRepositoryToken } from '@nestjs/typeorm';
-import { Repository } from 'typeorm';
+import { DataSource, Repository } from 'typeorm';
 import { BusinessException } from '~/common/exceptions/business.exception';
 import { DEFAULT_INSURANCE_ATTACHMENT_MAX_SIZE } from '~/config/constants';
 import { UserEntity } from '~/modules/user/entities/user.entity';
@@ -26,6 +26,7 @@ describe('InsurancePolicyService', () => {
   let userRepository: jest.Mocked<Repository<UserEntity>>;
   let fileRepository: jest.Mocked<Repository<FileEntity>>;
   let fileService: jest.Mocked<FileService>;
+  let dataSource: jest.Mocked<DataSource>;
 
   beforeEach(async () => {
     jest.useFakeTimers().setSystemTime(new Date('2026-05-01T00:00:00.000Z'));
@@ -62,6 +63,30 @@ describe('InsurancePolicyService', () => {
             normalizePublicAccessUrl: jest.fn(async (file: FileEntity) => file),
           },
         },
+        {
+          provide: DataSource,
+          useValue: {
+            transaction: jest.fn(async (callback) =>
+              callback({
+                getRepository: (entity: unknown) => {
+                  if (entity === InsurancePolicyEntity) {
+                    return policyRepository;
+                  }
+
+                  if (entity === InsurancePolicyAttachmentEntity) {
+                    return attachmentRepository;
+                  }
+
+                  if (entity === InsurancePolicyReminderEntity) {
+                    return reminderRepository;
+                  }
+
+                  return null;
+                },
+              }),
+            ),
+          },
+        },
         { provide: LoggerService, useValue: createMockLogger() },
       ],
     }).compile();
@@ -74,6 +99,7 @@ describe('InsurancePolicyService', () => {
     userRepository = module.get(getRepositoryToken(UserEntity));
     fileRepository = module.get(getRepositoryToken(FileEntity));
     fileService = module.get(FileService);
+    dataSource = module.get(DataSource);
 
     policyRepository.create.mockImplementation((data) => data as InsurancePolicyEntity);
     policyRepository.save.mockImplementation(async (data) =>
@@ -405,6 +431,54 @@ describe('InsurancePolicyService', () => {
       1,
       { maxSize: DEFAULT_INSURANCE_ATTACHMENT_MAX_SIZE },
     );
+  });
+
+  it('wraps policy persistence, attachment and reminder rebuild in a single transaction', async () => {
+    memberRepository.findOne.mockResolvedValue(
+      Object.assign(new InsuranceMemberEntity(), { id: 3 }),
+    );
+    userRepository.findOne.mockResolvedValue(Object.assign(new UserEntity(), { id: 7 }));
+    fileRepository.find.mockResolvedValue([{ id: 22, module: 'insurance-policy' } as FileEntity]);
+    policyRepository.create.mockImplementation((data) => data as InsurancePolicyEntity);
+    policyRepository.save.mockImplementation(async (data) =>
+      Object.assign(new InsurancePolicyEntity(), { id: 88 }, data),
+    );
+
+    await service.createPolicy(
+      {
+        name: '家庭百万医疗',
+        memberId: 3,
+        type: InsurancePolicyType.MEDICAL,
+        endDate: '2026-12-31',
+        attachmentFileIds: [22],
+      } as any,
+      { id: 7 } as any,
+    );
+
+    expect(dataSource.transaction).toHaveBeenCalled();
+  });
+
+  it('does not drop existing attachments/reminders when reminder rebuild fails (rollback on update)', async () => {
+    policyRepository.findOne.mockResolvedValue(
+      Object.assign(new InsurancePolicyEntity(), {
+        id: 88,
+        name: '家庭百万医疗',
+        memberId: 3,
+        type: InsurancePolicyType.MEDICAL,
+        ownerUserId: 7,
+        endDate: '2026-12-31',
+        nextPaymentDate: '2026-08-15',
+        reminders: [],
+      }),
+    );
+    userRepository.findOne.mockResolvedValue(Object.assign(new UserEntity(), { id: 9 }));
+    policyRepository.save.mockImplementation(async (data) => data as InsurancePolicyEntity);
+    // 重建提醒时 save 抛错：必须整体抛出，事务回滚，旧提醒不被静默清空
+    reminderRepository.delete.mockResolvedValue({} as any);
+    reminderRepository.save.mockRejectedValue(new Error('db write failed'));
+
+    await expect(service.updatePolicy(88, { ownerUserId: 9 })).rejects.toThrow('db write failed');
+    expect(dataSource.transaction).toHaveBeenCalled();
   });
 
   it('rebuilds pending reminders when the policy owner changes', async () => {

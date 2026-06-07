@@ -79,6 +79,10 @@ describe('TaskService', () => {
                     return checkItemRepository;
                   }
 
+                  if (entity === TaskAttachmentEntity) {
+                    return attachmentRepository;
+                  }
+
                   return null;
                 },
               }),
@@ -185,6 +189,73 @@ describe('TaskService', () => {
         continuousReminderIntervalMinutes: 30,
       }),
     );
+  });
+
+  it('wraps task creation and attachment/check-item replacement in a single transaction', async () => {
+    const list = Object.assign(new TaskListEntity(), {
+      id: 2,
+      name: '家庭计划',
+      scope: TaskListScope.FAMILY,
+    });
+    const savedTask = Object.assign(new TaskEntity(), {
+      id: 10,
+      title: '带附件的任务',
+      listId: 2,
+      creatorId: 1,
+      status: TaskStatus.PENDING,
+    });
+
+    listRepository.findOne.mockResolvedValue(list);
+    fileRepository.find.mockResolvedValue([{ id: 101 } as FileEntity]);
+    taskRepository.create.mockImplementation((data) => data as TaskEntity);
+    taskRepository.save.mockResolvedValue(savedTask);
+    attachmentRepository.delete.mockResolvedValue({} as any);
+    attachmentRepository.create.mockImplementation((data) => data as TaskAttachmentEntity);
+    attachmentRepository.save.mockResolvedValue([] as any);
+    checkItemRepository.delete.mockResolvedValue({} as any);
+    checkItemRepository.create.mockImplementation((data) => data as TaskCheckItemEntity);
+    checkItemRepository.save.mockResolvedValue([] as any);
+
+    await service.createTask(
+      {
+        title: '带附件的任务',
+        listId: 2,
+        dueAt: '2026-05-01T10:00:00.000Z',
+        attachmentFileIds: [101],
+        checkItems: [{ title: '步骤一' }],
+      } as any,
+      { id: 1 } as any,
+    );
+
+    expect(dataSource.transaction).toHaveBeenCalled();
+  });
+
+  it('does not delete existing attachments when attachment replacement fails (rollback on update)', async () => {
+    const existing = Object.assign(new TaskEntity(), {
+      id: 10,
+      title: '已有附件的任务',
+      listId: 2,
+      creatorId: 1,
+      status: TaskStatus.PENDING,
+      list: Object.assign(new TaskListEntity(), {
+        id: 2,
+        scope: TaskListScope.FAMILY,
+        isArchived: false,
+      }),
+    });
+
+    mockTaskLookup(existing);
+    fileRepository.find.mockResolvedValue([{ id: 101 } as FileEntity]);
+    taskRepository.save.mockImplementation(async (data) => data as TaskEntity);
+    // 替换附件时 save 抛错：必须整体抛出，事务回滚，旧附件不被静默清空
+    attachmentRepository.delete.mockResolvedValue({} as any);
+    attachmentRepository.create.mockImplementation((data) => data as TaskAttachmentEntity);
+    attachmentRepository.save.mockRejectedValue(new Error('db write failed'));
+
+    await expect(
+      service.updateTask(10, { attachmentFileIds: [101] } as any, { id: 1 } as any),
+    ).rejects.toThrow('db write failed');
+    expect(dataSource.transaction).toHaveBeenCalled();
   });
 
   it('rejects assigning a task in a personal list', async () => {

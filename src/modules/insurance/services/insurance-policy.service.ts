@@ -1,7 +1,7 @@
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 import dayjs from 'dayjs';
-import { In, IsNull, Repository } from 'typeorm';
+import { DataSource, EntityManager, In, IsNull, Repository } from 'typeorm';
 import { BusinessException } from '~/common/exceptions/business.exception';
 import { PaginationResult } from '~/common/types/pagination.types';
 import { DEFAULT_INSURANCE_ATTACHMENT_MAX_SIZE } from '~/config/constants';
@@ -69,6 +69,7 @@ export class InsurancePolicyService {
     @InjectRepository(FileEntity)
     private readonly fileRepository: Repository<FileEntity>,
     private readonly fileService: FileService,
+    private readonly dataSource: DataSource,
     private readonly logger: LoggerService,
   ) {}
 
@@ -113,9 +114,12 @@ export class InsurancePolicyService {
       type: dto.type,
     });
     this.ensurePolicyRules(entity);
-    const saved = await this.policyRepository.save(entity);
-    await this.replaceAttachments(saved.id, dto.attachmentFileIds);
-    await this.rebuildPendingReminders(saved);
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const persisted = await manager.getRepository(InsurancePolicyEntity).save(entity);
+      await this.replaceAttachments(persisted.id, dto.attachmentFileIds, manager);
+      await this.rebuildPendingReminders(persisted, manager);
+      return persisted;
+    });
     this.logger.log(`Created insurance policy "${saved.name}" by user ${user.id}`);
     return saved;
   }
@@ -235,13 +239,16 @@ export class InsurancePolicyService {
     }
     this.ensurePolicyRules(entity);
 
-    const saved = await this.policyRepository.save(entity);
-    if (dto.attachmentFileIds !== undefined) {
-      await this.replaceAttachments(saved.id, dto.attachmentFileIds);
-    }
-    if (this.reminderFingerprint(saved) !== previousReminderFingerprint) {
-      await this.rebuildPendingReminders(saved);
-    }
+    const saved = await this.dataSource.transaction(async (manager) => {
+      const persisted = await manager.getRepository(InsurancePolicyEntity).save(entity);
+      if (dto.attachmentFileIds !== undefined) {
+        await this.replaceAttachments(persisted.id, dto.attachmentFileIds, manager);
+      }
+      if (this.reminderFingerprint(persisted) !== previousReminderFingerprint) {
+        await this.rebuildPendingReminders(persisted, manager);
+      }
+      return persisted;
+    });
 
     return saved;
   }
@@ -387,16 +394,23 @@ export class InsurancePolicyService {
     }
   }
 
-  private async replaceAttachments(policyId: number, fileIds?: number[]): Promise<void> {
+  private async replaceAttachments(
+    policyId: number,
+    fileIds?: number[],
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repo = manager
+      ? manager.getRepository(InsurancePolicyAttachmentEntity)
+      : this.attachmentRepository;
     const ids = this.uniqueIds(fileIds);
-    await this.attachmentRepository.delete({ policyId });
+    await repo.delete({ policyId });
     if (ids.length === 0) {
       return;
     }
 
-    await this.attachmentRepository.save(
+    await repo.save(
       ids.map((fileId, index) =>
-        this.attachmentRepository.create({
+        repo.create({
           policyId,
           fileId,
           sort: index,
@@ -405,8 +419,14 @@ export class InsurancePolicyService {
     );
   }
 
-  private async rebuildPendingReminders(policy: InsurancePolicyEntity): Promise<void> {
-    await this.reminderRepository.delete({ policyId: policy.id, sentAt: IsNull() as any });
+  private async rebuildPendingReminders(
+    policy: InsurancePolicyEntity,
+    manager?: EntityManager,
+  ): Promise<void> {
+    const repo = manager
+      ? manager.getRepository(InsurancePolicyReminderEntity)
+      : this.reminderRepository;
+    await repo.delete({ policyId: policy.id, sentAt: IsNull() as any });
     const sentReminderKeys = this.getSentReminderKeys(policy);
     const reminders = this.buildReminderEntities(policy).filter(
       (reminder) => !sentReminderKeys.has(this.reminderKey(reminder)),
@@ -415,7 +435,7 @@ export class InsurancePolicyService {
       return;
     }
 
-    await this.reminderRepository.save(reminders);
+    await repo.save(reminders);
   }
 
   private buildReminderEntities(policy: InsurancePolicyEntity): InsurancePolicyReminderEntity[] {
