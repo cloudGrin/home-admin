@@ -2,6 +2,12 @@
 
 [中文说明](./README.zh-CN.md)
 
+## AI and Contributor Entry
+
+- Agent entry: [`AGENTS.md`](AGENTS.md)
+- Detailed harness: [`docs/agent-harness/index.md`](docs/agent-harness/index.md)
+- Commands and verification: [`docs/agent-harness/commands.md`](docs/agent-harness/commands.md), [`docs/agent-harness/sensors.md`](docs/agent-harness/sensors.md)
+
 Home Admin is the NestJS backend for the Home self-hosted personal and family admin suite. It powers
 a desktop admin console and a mobile H5 app with authentication, RBAC, tasks, insurance records,
 family posts, real-time chat, file storage, notifications, automation jobs, and API key based open

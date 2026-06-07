@@ -2,6 +2,12 @@
 
 [English](./README.md)
 
+## AI 与贡献入口
+
+- Agent 入口：[`AGENTS.md`](AGENTS.md)
+- Harness 总入口：[`docs/agent-harness/index.md`](docs/agent-harness/index.md)
+- 命令与验证：[`docs/agent-harness/commands.md`](docs/agent-harness/commands.md)、[`docs/agent-harness/sensors.md`](docs/agent-harness/sensors.md)
+
 Home Admin 是 Home 自托管个人与家庭管理套件的 NestJS 后端。它为桌面管理后台和移动端 H5 应用提供认证、
 RBAC、任务、家庭保险、家庭圈、实时群聊、文件存储、通知、自动化任务和 API Key 开放接口能力。
 

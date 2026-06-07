@@ -1,53 +1,22 @@
-# Home Admin Development Notes
+# CLAUDE.md - Home Admin
 
-## Project Goal
+本文件只做 Claude 兼容入口。通用 agent 规则以 `AGENTS.md` 为准，详细开发须知统一维护在 `docs/agent-harness/`。
 
-Home Admin is a personal admin backend. It should stay easy to run, easy to extend, and useful as a data backend for future external Web/H5/app ideas.
+## 必读入口
 
-Keep the project as one NestJS server. Do not introduce distributed infrastructure unless there is a real requirement.
+- `AGENTS.md`
+- `docs/agent-harness/index.md`
+- `docs/agent-harness/repo-map.md`
+- `docs/agent-harness/commands.md`
+- `docs/agent-harness/sensors.md`
+- `docs/agent-harness/backend.md`
+- `docs/agent-harness/risk-zones.md`
+- `docs/agent-harness/task-protocol.md`
 
-## Current Modules
+## Claude 约束
 
-- `auth`: JWT login, refresh token, logout.
-- `user`: user profile and admin user management.
-- `role`: role management, role-permission and role-menu assignment.
-- `permission`: permission records enforced by guards.
-- `menu`: role-based admin menu tree.
-- `api-auth`: API apps and API keys.
-- `open-api`: API-Key protected external APIs.
-- `file`: direct upload, download, list, delete with local or OSS storage.
-- `notification`: internal notification records plus Bark/Feishu delivery.
-- `cron`: code-defined scheduled jobs.
-- `health`: health and readiness endpoints.
-
-## Architecture Rules
-
-- Controllers should only coordinate HTTP, DTOs, decorators, and service calls.
-- Services own business behavior.
-- Inject TypeORM repositories directly into services when needed.
-- Use DTOs for request bodies and response contracts.
-- Use migrations for schema changes. Do not enable automatic schema sync.
-- No route is accessible by default: use permission decorators, `@AllowAuthenticated`, or `@Public`.
-
-## Configuration Notes
-
-- `TRUST_PROXY=false` by default. Enable it only behind a trusted reverse proxy.
-- `FILE_STORAGE=local` by default. OSS is optional.
-- Notification external delivery supports Bark and Feishu only.
-- Cache is process memory by design for the current single-server target.
-
-## Test Commands
-
-```bash
-pnpm test
-pnpm test:e2e
-pnpm build
-pnpm lint
-```
-
-## Implementation Bias
-
-- Prefer concrete code over generic engines.
-- Delete dead scaffolding when a feature is removed.
-- Do not add extra servers, background platforms, or cross-process coordination for speculative needs.
-- Keep external API features scope-based and explicit.
+- 用中文回复，并在最终回复中列出改动范围、验证、未验证项和风险。
+- 先看 `git status --short`，不要恢复或删除用户已有未提交变更。
+- 不执行 `git add`、`git commit`、`git reset`、`git checkout --`，除非用户明确要求。
+- 修改认证、权限、菜单、迁移、文件、通知、Open API 前，先读 `risk-zones.md`。
+- 不能仅凭历史记忆或旧文档下结论；以当前源码、配置、package scripts 和测试为准。
